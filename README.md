@@ -21,6 +21,8 @@ Here are the commands defined in `cmdlist.el`:
 
    `show-unused-newcmds` shows all the commands defined in the present file which are not being used.
 
+   `delete-unused-newcmds` does the same, and also offers to delete them.
+
 * Adding new commands
 
    `generate-and-add-cmd` queries for a new command definition and adds it to the present file or to the global command file (based on `cmdlist-add-to-file-default` and whether there's a prefix argument).
@@ -72,7 +74,7 @@ Here are the keybindings I use (with `evil-mode`):
   (kbd "SPC g b") 'generate-mathbf
   (kbd "SPC g B") 'generate-mathbb
   (kbd "SPC g p") 'generate-package
-  (kbd "SPC g z") 'show-unused-newcmds
+  (kbd "SPC g z") 'delete-unused-newcmds
   (kbd "SPC g f") 'open-cmdlist-file)
 ```
 

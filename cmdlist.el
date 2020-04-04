@@ -21,7 +21,7 @@
 ;; you like to use. This package then provides tools to maintain that
 ;; file and automatically update your latex files based on it.
 
-;; There are several convenience functions, all of which are listed in
+;; There are several convenience functions, most of which are listed in
 ;; the example keybindings below. The most import one is
 ;; cmdlist-update-latex-buffer. See the documentation of those
 ;; functions for more info, as well as the customizatoin variables
@@ -39,7 +39,7 @@
 ;;   (kbd "SPC g b") 'generate-mathbf
 ;;   (kbd "SPC g B") 'generate-mathbb
 ;;   (kbd "SPC g p") 'generate-package
-;;   (kbd "SPC g z") 'show-unused-newcmds
+;;   (kbd "SPC g z") 'delete-unused-newcmds
 ;;   (kbd "SPC g f") 'open-cmdlist-file)
 
 ;; TODO Make this also handle \\newtheorem
@@ -56,8 +56,11 @@
 (defvar cmdlist-heading "% Commands"
   "Heading under which commands are inserted into the current buffer.")
 
-(defvar cmdlist-visit-after-adding t
-  "If non-nil, visit cmdlist file after adding new command.")
+(defvar cmdlist-visit-after-adding 'nil
+  "If non-nil, visit cmdlist file after adding new command, unless value is `ask', in which case ask first.")
+
+(defvar cmdlist-also-add-to-buffer nil
+  "If non-nil, also add command to buffer when adding to cmdlist, unless value is `ask', in which case ask first.")
 
 (defvar cmdlist-add-to-file-default nil
   "If non-nil, add new commands to cmdlist file by default (i.e., without prefix argument) rather than to current buffer.")
@@ -361,9 +364,13 @@ If the command being defined in NEWCMD is already in FILE, ask for confirmation.
                   (save-buffer))
                 (if (not cmdlist-visit-after-adding)
                     (kill-buffer fibuf)
-                  (switch-to-buffer-other-window fibuf)
-                  (search-forward newcmd)
-                  (beginning-of-line)))
+                  (unless (and (eq cmdlist-visit-after-adding 'ask)
+                               (not (y-or-n-p
+                                     (format "New entry\n  %s\nadded to file %s\nVisit? "
+                                             newcmd file))))
+                    (switch-to-buffer-other-window fibuf)
+                    (search-forward newcmd)
+                    (beginning-of-line))))
               (message "New entry\n  %s\nadded to file %s" newcmd file))
           (message "Operation cancelled.")))
     (message "File %s does not exist or not readable/writable." file)))
@@ -439,7 +446,14 @@ By default HEADING is `cmdlist-heading' and FILES are the files in the variable 
     (interactive "P")
     (when cmdlist-add-to-file-default
       (setq tofile (not tofile)))
-    (add-newcmd (generate-newcmd) nil (when tofile t)))
+    (let* ((newcmd (generate-newcmd))
+           (tobuf (and tofile
+                       cmdlist-also-add-to-buffer
+                       (if (eq cmdlist-also-add-to-buffer 'ask)
+                           (y-or-n-p (format "Also add\n  %s\nto buffer?" newcmd)) t))))
+      (add-newcmd newcmd nil (when tofile t))
+      (when tobuf
+        (add-newcmd newcmd nil nil))))
 
 (defun generate-and-add-fontletter (font &optional heading file)
   "Generate a ``\\newcommand'' of the form `\\newcomand\\name{\\FONT{letter}}' and add it to the current buffer or to FILE with `add-newcmd' (hence FILE can be `t').
@@ -471,18 +485,49 @@ The name and letter are queried for, and by default are both the latex macro und
   (let ((name (read-from-minibuffer "Package name? ")))
     (stick-at-top "% Packages" (concat "\\usepackage{" name "}"))))
 
+(defun get-unused-newcmds ()
+  "Return a list of `\\newcommand's in this buffer which are (apparently) not being used."
+  (let* ((cmds (scan-for-latex-cmds))
+         (newcmds (scan-for-newcmds))
+         (unuseds (dofilter (x newcmds)
+                    (not (member (newcmd-name x) cmds)))))
+    unuseds))
+
 (defun show-unused-newcmds ()
   "Display `\\newcommand's in this buffer which are (apparently) not being used."
   (interactive)
-  (let* ((cmds (scan-for-latex-cmds))
-         (newcmds (scan-for-newcmds))
-         (unuesds (dofilter (x newcmds)
-                    (not (member (newcmd-name x) cmds)))))
-    (if unuesds
-        (message "Seemingly unused commands:\n%s" (list-of-things unuesds))
+  (let ((unuseds (get-unused-newcmds)))
+    (if unuseds
+        (message "Seemingly unused commands:\n%s" (list-of-things unuseds))
+      (message "No unused commands found"))))
+
+(defun delete-unused-newcmds ()
+  "Delete (seemingly) unused `\\newcommand's in this buffer, after prompting."
+  (interactive)
+  (let ((unuseds (get-unused-newcmds)))
+    (if unuseds
+        (when (y-or-n-p (format "Seemingly unused commands:\n%s\nDelete? " (list-of-things unuseds)))
+          (dolist (x unuseds)
+            (save-mark-and-excursion
+              (goto-char (point-min))
+              (search-forward x)
+              (beginning-of-line)
+              (kill-line 1))))
       (message "No unused commands found"))))
 
 (defun open-cmdlist-file ()
   "`(find-file-other-window (car cmdlist-files))'"
   (interactive)
-  (find-file-other-window (car cmdlist-files)))
+  (let ((cmd (latex-cmd-under-point)))
+    (find-file-other-window (car cmdlist-files))
+    (setq cmd (completing-read "Goto command: "
+                               (mapcar 'newcmd-name (scan-for-newcmds))
+                               nil nil cmd))
+    (when cmd
+      (let ((cmd-pos))
+        (save-mark-and-excursion
+          (goto-char (point-min))
+          (when (re-search-forward (format "\\\\newcommand{?\\\\%s[}{\\[]" cmd) nil t)
+            (setq cmd-pos (point))))
+        (when cmd-pos
+          (goto-char cmd-pos))))))
