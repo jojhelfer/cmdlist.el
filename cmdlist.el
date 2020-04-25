@@ -413,19 +413,21 @@ this macro."
                                           name numargs))))
     (assemble-newcmd name defn numargs optional)))
 
-(defun cmdlist-update-latex-buffer (&optional heading files)
-  "Add to current buffer under HEADING all commands defined in FILES which are present in the current file and not already defined.
+(defun cmdlist-update-latex-buffer (&optional heading files prefix)
+  "Add to current buffer under HEADING all commands defined in FILES which are present in the current file and not already defined. If PREFIX is non-nil, it is prepended to `\\newcommand'.
 
 By default HEADING is `cmdlist-heading' and FILES are the files in the variable `cmdlist-files'."
   (interactive)
   (unless heading (setq heading cmdlist-heading))
   (unless files (setq files cmdlist-files))
+  (unless prefix (setq prefix ""))
   (let* ((cmdlist (apply 'append (mapcar 'scan-file-for-newcmds files)))
          (cmds (scan-for-latex-cmds))
          (exceptions (mapcar 'newcmd-name (scan-for-newcmds)))
          (newcmds (select-cmds-from-cmdlist cmdlist cmds exceptions)))
     (if newcmds
         (progn
+          (setq newcmds (mapcar (lambda (x) (concat prefix x)) newcmds))
           (stick-at-top heading newcmds 'sort-newcmds)
           (message "Added %d new commands:\n%s" (length newcmds) (list-of-things newcmds)))
       (message "No commands added."))))
