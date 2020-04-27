@@ -524,7 +524,7 @@ The name and letter are queried for, and by default are both the latex macro und
     (find-file-other-window (car cmdlist-files))
     (setq cmd (completing-read "Goto command: "
                                (mapcar 'newcmd-name (scan-for-newcmds))
-                               nil nil cmd))
+                               nil nil nil nil cmd))
     (when cmd
       (let ((cmd-pos))
         (save-mark-and-excursion
