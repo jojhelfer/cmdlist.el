@@ -191,20 +191,31 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
           (end-of-line)
           (buffer-substring-no-properties beg (point)))))))
 
-(defun scan-for-latex-cmds ()
+(defun scan-for-latex-cmds (&optional ignore-newcmds)
   "Return all names of latex commands in current buffer."
-  (let ((cmds))
+  (let (cmds last-newcmd-pos)
     (save-mark-and-excursion
+      (when ignore-newcmds
+        (goto-char (point-max))
+        (if (not (search-backward "\\newcommand" nil t))
+            (setq ignore-newcmds nil)
+          (forward-char 11)
+          (when (eq (char-after) ?\{)
+            (forward-brexp))
+          (forward-brexp)
+          (setq last-newcmd-pos (point))))
       (goto-char (point-min))
       (while (search-forward "\\" nil t)
         (let ((cmd (latex-cmd-under-point)))
-          (when (and cmd
-                     (not (equal cmd ""))
-                     (not (let ((snc (surrounding-newcmd)))
-                            (and snc
-                                 (equal cmd (newcmd-name snc))))))
-            (add-to-list 'cmds cmd)))))
-    (reverse cmds)))
+          (unless (or (not cmd)
+                      (equal cmd "")
+                      (and ignore-newcmds
+                           (< (point) last-newcmd-pos)
+                           (let ((snc (surrounding-newcmd)))
+                             (and snc
+                                  (equal cmd (newcmd-name snc))))))
+            (push cmd cmds)))))
+    (reverse (delete-dups cmds))))
 
 (defun newcmd-name (cmd)
   "Return the name of the given \\newcommmand."
@@ -489,7 +500,7 @@ The name and letter are queried for, and by default are both the latex macro und
 
 (defun get-unused-newcmds ()
   "Return a list of `\\newcommand's in this buffer which are (apparently) not being used."
-  (let* ((cmds (scan-for-latex-cmds))
+  (let* ((cmds (scan-for-latex-cmds t))
          (newcmds (scan-for-newcmds))
          (unuseds (dofilter (x newcmds)
                     (not (member (newcmd-name x) cmds)))))
