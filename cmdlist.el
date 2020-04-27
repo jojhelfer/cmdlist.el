@@ -176,14 +176,29 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
     (when start
       (goto-char start))))
 
+(defun re-search-backward-incl (regex)
+  "Goto beginning of first instance REGEX occurring before or around point. Return nil if STRING was not found."
+  (let ((start (point))
+        (place))
+    (save-mark-and-excursion
+      (if (re-search-backward regex nil t)
+          (progn (setq place (match-beginning 0))
+                 (forward-char))
+        (goto-char (point-min)))
+      (when (and (re-search-forward regex nil t)
+                 (<= (match-beginning 0) start))
+        (setq place (match-beginning 0))))
+    (when place
+      (goto-char place))))
+
 (defun surrounding-newcmd ()
   "If point is not inside of a latex `\\newcommand', return nil. Otherwise, return the text of the whole command."
   (let ((start (point))
         (beg))
     (save-mark-and-excursion
-      (when (search-backward-incl "\\newcommand")
+      (when (re-search-backward-incl "\\\\r?e?newcommand")
         (setq beg (point))
-        (search-forward "\\newcommand")
+        (search-forward-regexp "\\\\r?e?newcommand")
         (when (eq (char-after) ?\{)
           (forward-brexp))
         (forward-brexp)
@@ -223,7 +238,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
     (with-temp-buffer
       (insert cmd)
       (goto-char (point-min))
-      (re-search-forward "\\\\newcommand{?")
+      (re-search-forward "\\\\r?e?newcommand{?")
       (substring (shloop-latex-arg) 1))))
 
 (defun scan-for-newcmds ()
@@ -231,7 +246,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
   (let ((res))
     (save-mark-and-excursion
       (goto-char (point-min))
-      (while (search-forward "\\newcommand" nil t)
+      (while (re-search-forward "\\\\r?e?newcommand" nil t)
         (push (surrounding-newcmd) res)
         (forward-brexp)))
     (reverse res)))
@@ -280,11 +295,11 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
            (sort-fold-case t))
         (sort-subr reverse 'forward-line
                    (lambda ()
-                     (search-backward-incl "\\newcommand")
-                     (search-forward "\\newcommand")
+                     (re-search-backward-incl "\\\\r?e?newcommand")
+                     (re-search-forward "\\\\r?e?newcommand")
                      (when (eq (char-after) ?\{) (forward-brexp))
                      (forward-brexp))
-                   (lambda () (re-search-forward "\\\\newcommand{?") nil))))))
+                   (lambda () (re-search-forward "\\\\r?e?newcommand{?") nil))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Finding commands in a list of \newcommands ;;
@@ -296,7 +311,10 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
     (or
      (string-prefix-p (concat "\\newcommand{\\" name "}") cmd)
      (string-prefix-p (concat "\\newcommand\\" name "[") cmd)
-     (string-prefix-p (concat "\\newcommand\\" name "{") cmd))))
+     (string-prefix-p (concat "\\newcommand\\" name "{") cmd)
+     (string-prefix-p (concat "\\renewcommand{\\" name "}") cmd)
+     (string-prefix-p (concat "\\renewcommand\\" name "[") cmd)
+     (string-prefix-p (concat "\\renewcommand\\" name "{") cmd))))
 
 (defun select-cmds-from-cmdlist (cmdlist names exceptions)
   "For each element of NAMES which is not in EXCEPTION, get all elements of CMDLIST which are `\\newcommand's defining this element, and return them in a list. Each time there are multiple matches, the user is queried for a choice."
@@ -540,7 +558,7 @@ The name and letter are queried for, and by default are both the latex macro und
       (let ((cmd-pos))
         (save-mark-and-excursion
           (goto-char (point-min))
-          (when (re-search-forward (format "\\\\newcommand{?\\\\%s[}{\\[]" cmd) nil t)
+          (when (re-search-forward (format "\\\\r?e?newcommand{?\\\\%s[}{\\[]" cmd) nil t)
             (setq cmd-pos (point))))
         (when cmd-pos
           (goto-char cmd-pos))))))
