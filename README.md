@@ -31,6 +31,9 @@ Here are the commands defined in `cmdlist.el`:
    - `generate-mathrm`
    - `generate-mathbf`
    - `generate-mathbb`
+   - `generate-mathcal`
+   - `generate-mathfrak`
+   - `generate-operatorname`
 
    `add-cmd-to-file` adds the command definition under point to the global command file.
 

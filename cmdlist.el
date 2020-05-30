@@ -38,6 +38,9 @@
 ;;   (kbd "SPC g r") 'generate-mathrm
 ;;   (kbd "SPC g b") 'generate-mathbf
 ;;   (kbd "SPC g B") 'generate-mathbb
+;;   (kbd "SPC g C") 'generate-mathcal
+;;   (kbd "SPC g F") 'generate-mathfrak
+;;   (kbd "SPC g o") 'generate-operatorname
 ;;   (kbd "SPC g p") 'generate-package
 ;;   (kbd "SPC g z") 'delete-unused-newcmds
 ;;   (kbd "SPC g f") 'open-cmdlist-file)
@@ -492,7 +495,7 @@ By default HEADING is `cmdlist-heading' and FILES are the files in the variable 
 The name and letter are queried for, and by default are both the latex macro under point."
   (let* ((name (read-from-minibuffer
                 (format "Name of %s command? \\" font) (latex-cmd-under-point)))
-         (letter (read-from-minibuffer "Letter? " name)))
+         (letter (read-from-minibuffer "Text? " name)))
     (add-newcmd (assemble-newcmd name (format "\\%s{%s}" font letter)) heading file)))
 
 (defun generate-mathbb (tofile)
@@ -509,6 +512,21 @@ The name and letter are queried for, and by default are both the latex macro und
   "Run `generate-and-add-fontletter' with `mathrm'. Prefix argument puts it in the cmdlist file."
   (interactive "P")
   (generate-and-add-fontletter "mathrm" nil (when tofile t)))
+
+(defun generate-mathcal (tofile)
+  "Run `generate-and-add-fontletter' with `mathcal'. Prefix argument puts it in the cmdlist file."
+  (interactive "P")
+  (generate-and-add-fontletter "mathcal" nil (when tofile t)))
+
+(defun generate-mathfrak (tofile)
+  "Run `generate-and-add-fontletter' with `mathfrak'. Prefix argument puts it in the cmdlist file."
+  (interactive "P")
+  (generate-and-add-fontletter "mathfrak" nil (when tofile t)))
+
+(defun generate-operatorname (tofile)
+  "Run `generate-and-add-fontletter' with `operatorname'. Prefix argument puts it in the cmdlist file."
+  (interactive "P")
+  (generate-and-add-fontletter "operatorname" nil (when tofile t)))
 
 (defun generate-package ()
   "Ask for a package name and stick it under `% Packages'"
