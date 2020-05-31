@@ -212,28 +212,29 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 (defun scan-for-latex-cmds (&optional ignore-newcmds)
   "Return all names of latex commands in current buffer."
   (let (cmds last-newcmd-pos)
-    (save-mark-and-excursion
-      (when ignore-newcmds
-        (goto-char (point-max))
-        (if (not (search-backward "\\newcommand" nil t))
-            (setq ignore-newcmds nil)
-          (forward-char 11)
-          (when (eq (char-after) ?\{)
-            (forward-brexp))
-          (forward-brexp)
-          (setq last-newcmd-pos (point))))
-      (goto-char (point-min))
-      (while (search-forward "\\" nil t)
-        (let ((cmd (latex-cmd-under-point)))
-          (unless (or (not cmd)
-                      (equal cmd "")
-                      (and ignore-newcmds
-                           (< (point) last-newcmd-pos)
-                           (let ((snc (surrounding-newcmd)))
-                             (and snc
-                                  (equal cmd (newcmd-name snc))))))
-            (push cmd cmds)))))
-    (reverse (delete-dups cmds))))
+    (save-restriction
+      (save-mark-and-excursion
+        (when ignore-newcmds
+          (goto-char (point-max))
+          (if (not (search-backward "\\newcommand" nil t))
+              (setq ignore-newcmds nil)
+            (forward-char 11)
+            (when (eq (char-after) ?\{)
+              (forward-brexp))
+            (forward-brexp)
+            (setq last-newcmd-pos (point))))
+        (goto-char (point-min))
+        (while (search-forward "\\" nil t)
+          (let ((cmd (latex-cmd-under-point)))
+            (unless (or (not cmd)
+                        (equal cmd "")
+                        (and ignore-newcmds
+                             (< (point) last-newcmd-pos)
+                             (let ((snc (surrounding-newcmd)))
+                               (and snc
+                                    (equal cmd (newcmd-name snc))))))
+              (push cmd cmds)))))
+      (reverse (delete-dups cmds)))))
 
 (defun newcmd-name (cmd)
   "Return the name of the given \\newcommmand."
@@ -247,12 +248,13 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 (defun scan-for-newcmds ()
   "Return a list of all \\newcommmands in the current buffer"
   (let ((res))
-    (save-mark-and-excursion
-      (goto-char (point-min))
-      (while (re-search-forward "\\\\r?e?newcommand" nil t)
-        (push (surrounding-newcmd) res)
-        (forward-brexp)))
-    (reverse res)))
+    (save-restriction
+      (save-mark-and-excursion
+        (goto-char (point-min))
+        (while (re-search-forward "\\\\r?e?newcommand" nil t)
+          (push (surrounding-newcmd) res)
+          (forward-brexp)))
+    (reverse res))))
 
 (defun scan-file-for-newcmds (file)
   "Return a list of all \\newcommmands in the given file"
@@ -359,24 +361,26 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
   "Stick TEXT (or each string in TEXT) after the first occurrence of HEADING, then sort it using SORTFUN if non-nil.
 If HEADING does not occur, first insert HEADING before \\begin{document}"
   (let ((starting-point))
-    (save-excursion
-      (goto-char (point-min))
-      (unless (search-forward heading nil t)
-        (search-forward "\\begin{document}")
-        (beginning-of-line)
-        (insert (concat heading "\n\n"))
-        (forward-line -2))
-      (forward-line)
-      (setq starting-point (point))
-      (forward-line -1)
-      (search-forward "\n\n" nil t)
-      (forward-line -1)
-      (when (not (listp text))
+    (save-restriction
+      (if (buffer-narrowed-p) (widen))
+      (save-excursion
+        (goto-char (point-min))
+        (unless (search-forward heading nil t)
+          (search-forward "\\begin{document}")
+          (beginning-of-line)
+          (insert (concat heading "\n\n"))
+          (forward-line -2))
+        (forward-line)
+        (setq starting-point (point))
+        (forward-line -1)
+        (search-forward "\n\n" nil t)
+        (forward-line -1)
+        (when (not (listp text))
           (setq text (list text)))
-      (dolist (tx text)
-        (insert (concat tx "\n")))
-      (when sortfun
-          (funcall sortfun nil starting-point (point))))))
+        (dolist (tx text)
+          (insert (concat tx "\n")))
+        (when sortfun
+          (funcall sortfun nil starting-point (point)))))))
 
 (defun add-to-cmdlist-file (newcmd &optional file)
   "Add NEWCMD to FILE (default: the first entry in `cmdlist-files') and then sort the lines.
