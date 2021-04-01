@@ -45,16 +45,25 @@
 ;;   (kbd "SPC g z") 'delete-unused-newcmds
 ;;   (kbd "SPC g f") 'open-cmdlist-file)
 
-;; TODO Make this also handle \\newtheorem
-;; TODO Maybe some automatic package handling too...
-;; TODO Adapt sort-newcmds for \\usepackage
+;; TODO Adapt sort-newcmds for \\usepackage (or maybe not since we are not sorting packages now)
+;; TODO Update documentation for theorem and package handling
+;; TODO Include compile-update-and-save helper functions
+;; TODO Handle \let and \def commands while scanning commands for package handling
+;; TODO Maybe handle commands with non [a-zA-Z] characters (like @) in the name
+;; TODO Also just read latex arguments better, e.g., skipping initial whitespace
+;; TODO Add commands to clean unused theorems and packages
+;; TODO Try to guess command provider by looking through package/class files
+;; TODO Allow annotating usepackage with provided commands, and adding to these automatically
+;; TODO Create temporary latex file for testing commands to see where they come from
+;; TODO Allow indicating that packages/classes include other packages
+;; TODO Ignore commands used in comments
 
 ;;;;;;;;;;;;;;;
 ;; Variables ;;
 ;;;;;;;;;;;;;;;
 
 (defvar cmdlist-files '("~/.latex-commands.sty")
-  "List of files containing `\\newcommand' entires to be used by `cmdlist.el'. The first entry is also used to store new commands.")
+  "List of files containing `\\\(re\)newcommand' entires to be used by `cmdlist.el'. The first entry is also used to store new commands.")
 
 (defvar cmdlist-heading "% Commands"
   "Heading under which commands are inserted into the current buffer.")
@@ -70,6 +79,24 @@
 
 (defvar cmdlist-braces-around-cmd-name nil
   "If non-nil, put braces around the command name (as in `\newcommand{\foo}' when adding new commands.")
+
+(defvar cmdlist-theorem-file "~/.latex-theorems.sty"
+  "Files containing `\\newtheorem' entires to be used by `cmdlist'.")
+
+(defvar cmdlist-default-shared-counter "defn"
+  "Default shared counter for `newtheorem's.")
+
+(defvar cmdlist-default-parent-counter nil
+  "Default parent counter for `newtheorem's (if `cmdlist-default-shared-counter' is `nil').")
+
+(defvar cmdlist-package-file "~/.latex-packages.sty"
+  "File each of whose lines contains a `\\usepackage' or `\\documentclass' command followed by a comment with a comma-separated list of commands and environment it provides.")
+
+(defvar cmdlist-package-heading "% Packages"
+  "Heading under which packages are inserted into the current buffer.")
+
+(defvar cmdlist-builtin-file "~/.latex-builtins"
+  "File containing a list of built-in latex commands and environments, one per line.")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; General utility functions ;;
@@ -194,14 +221,15 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
     (when place
       (goto-char place))))
 
-(defun surrounding-newcmd ()
-  "If point is not inside of a latex `\\newcommand', return nil. Otherwise, return the text of the whole command."
+(defun surrounding-newcmd (&optional regex)
+  "If point is not inside of a latex `\\\(re\)newcommand' (or given REGEX, e.g., `\\newtheorem'), return nil. Otherwise, return the text of the whole command."
+  (unless regex (setq regex "\\\\r?e?newcommand"))
   (let ((start (point))
         (beg))
     (save-mark-and-excursion
-      (when (re-search-backward-incl "\\\\r?e?newcommand")
+      (when (re-search-backward-incl regex)
         (setq beg (point))
-        (search-forward-regexp "\\\\r?e?newcommand")
+        (search-forward-regexp regex)
         (when (eq (char-after) ?\{)
           (forward-brexp))
         (forward-brexp)
@@ -237,13 +265,13 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
       (reverse (delete-dups cmds)))))
 
 (defun newcmd-name (cmd)
-  "Return the name of the given \\newcommmand."
+  "Return the name of the given `\\\(re\)newcommmand' or `\\newtheorem'."
   (save-mark-and-excursion
     (with-temp-buffer
       (insert cmd)
       (goto-char (point-min))
-      (re-search-forward "\\\\r?e?newcommand{?")
-      (substring (shloop-latex-arg) 1))))
+      (re-search-forward "\\\\r?e?newcommand\\|\\\\newtheorem")
+      (car (split-string (shloop-latex-arg) nil nil "[{}]?\\\\?")))))
 
 (defun scan-for-newcmds ()
   "Return a list of all \\newcommmands in the current buffer"
@@ -311,7 +339,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun get-cmdlist-matches (cmdlist name)
-  "Return all elements of CMDLIST which are `\\newcommand's defining the command NAME."
+  "Return all elements of CMDLIST which are `\\\(re\)newcommand's defining the command NAME."
   (dofilter (cmd cmdlist)
     (or
      (string-prefix-p (concat "\\newcommand{\\" name "}") cmd)
@@ -555,9 +583,9 @@ The name and letter are queried for, and by default are both the latex macro und
       (message "No unused commands found"))))
 
 (defun delete-unused-newcmds ()
-  "Delete (seemingly) unused `\\newcommand's in this buffer, after prompting."
+  "Delete (seemingly) unused `\\\(re\)newcommand's and `\\\\newtheorem's in this buffer, after prompting."
   (interactive)
-  (let ((unuseds (get-unused-newcmds)))
+  (let ((unuseds (append (get-unused-newcmds) (get-unused-newthms))))
     (if unuseds
         (when (y-or-n-p (format "Seemingly unused commands:\n%s\nDelete? " (list-of-things unuseds)))
           (dolist (x unuseds)
@@ -584,3 +612,340 @@ The name and letter are queried for, and by default are both the latex macro und
             (setq cmd-pos (point))))
         (when cmd-pos
           (goto-char cmd-pos))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Environments and theorems ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun scan-for-latex-envs ()
+  "Return all names of latex environments in current buffer."
+  (let (envs)
+    (save-restriction
+      (save-mark-and-excursion
+        (goto-char (point-min))
+        (while (search-forward "\\begin{" nil t)
+          (backward-char)
+          (push (car (split-string (shloop-latex-arg) nil nil "[{}]")) envs))))
+      (reverse (delete-dups envs))))
+
+(defun stick-thm-at-top (text &optional style shared-counter parent-counter)
+  "Run stick-at-top with TEXT and with heading set to `\theoremstyle{STYLE}' (by default, STYLE is  read from a comment at the end of text, which is removed, and is otherwise `plain'), and with no sorting. If SHARED-COUNTER is provided, add it as an optional argument after the first argument. Otherwise, if PARENT-COUNTER is provided, add it as an optional argument after the second argument. Otherwise, if `cmdlist-default-shared-counter' is non-nil, use that as SHARED-COUNTER. Otherwise, if `cmdlist-default-parent-counter' is non-nil, use that as PARENT-COUNTER."
+  (unless (or shared-counter parent-counter)
+    (setq shared-counter cmdlist-default-shared-counter)
+    (setq parent-counter cmdlist-default-parent-counter))
+  (with-temp-buffer
+    (insert text)
+    ;; Get style if present. Else default to `plain'.
+    (goto-char (point-min))
+    (if (re-search-forward "%\\(.*\\)" nil t)
+        (progn (unless style (setq style (match-string-no-properties 1)))
+               (replace-match ""))
+      (unless style (setq style "plain")))
+    ;; Handle counter
+    (goto-char (point-min))
+    (when (and (or shared-counter parent-counter)
+               (re-search-forward "\\[[^\\]*\\]" nil t))
+      (replace-match ""))
+    (goto-char (point-min))
+    ;; If shared-counter is the current theorem, don't add it.
+    (unless (and shared-counter (search-forward (concat "{" shared-counter "}") nil t))
+      (goto-char (point-min))
+      (when (search-forward "}")
+        (if shared-counter
+            (insert "[" shared-counter "]")
+          (when (and parent-counter (search-forward "}"))
+            (insert "[" parent-counter "]")))))
+    (setq text (buffer-substring-no-properties (point-min) (point-max))))
+  (stick-at-top (concat "\\theoremstyle{" style "}") text))
+
+(defun scan-for-newthms ()
+  "Return a list of all `\\newtheorem's in the current buffer"
+  ;; This is adapted from scan-for-newcmds. Perhaps something should be factored out?
+  (let ((res))
+    (save-restriction
+      (save-mark-and-excursion
+        (goto-char (point-min))
+        (while (re-search-forward "\\\\newtheorem" nil t)
+          (push (surrounding-newcmd "\\\\newtheorem") res)
+          (forward-brexp)))
+    (reverse res))))
+
+(defun get-unused-newthms ()
+  "Return a list of `\\newtheorem's in this buffer which are (apparently) not being used."
+  ;; This is adapted from `get-unused-newthms'. Perhaps something should be factored out?
+  (let* ((envs (scan-for-latex-envs))
+         (newthms (scan-for-newthms))
+         (unuseds (dofilter (x newthms)
+                    (not (member (newcmd-name x) envs)))))
+    unuseds))
+
+(defun scan-file-for-newthms (file)
+  "Return a list of all `\\newtheorem's in the given file"
+  ;; This is adapted from `scan-file-for-newcmds'. Perhaps something should be factored out?
+  (save-mark-and-excursion
+    (with-temp-buffer
+      (insert-file-contents file)
+      (scan-for-newthms))))
+
+(defun cmdlist-newthm-update-latex-buffer (&optional file)
+  "Add to current buffer all ``\\newtheorem's defined in FILE (using `stick-thm-at-top') which are present in the current file and not already defined. By default FILE is `cmdlist-theorem-file'."
+  ;; This is adapted from `cmdlist-update-latex-buffer'. Perhaps something should be factored out?
+  (interactive)
+  (unless file (setq file cmdlist-theorem-file))
+  (let* ((thmlist (scan-file-for-newthms file))
+         (envs (scan-for-latex-envs))
+         (exceptions (mapcar 'newcmd-name (scan-for-newthms)))
+         (newthms
+          (dofilter (thm thmlist)
+            (and (member (newcmd-name thm) envs)
+                 (not (member (newcmd-name thm) exceptions))))))
+    (if newthms
+        (progn
+          (dolist (thm newthms)
+            (stick-thm-at-top thm))
+          (message "Added %d new theorem:\n%s" (length newthms) (list-of-things newthms)))
+      (message "No theorems added."))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Packages and built-ins ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun package-and-class-sort ()
+  "Sort lines in buffer ignoring initial `\\usepackage' or `\\documentclass'."
+  (save-mark-and-excursion
+    (goto-char (point-min))
+    (let ((sort-fold-case t))
+      (sort-subr nil 'forward-line 'end-of-line
+                 (lambda ()
+                   (save-match-data
+                     (and (re-search-forward
+                           "^\\\\\\(usepackage\\|documentclass\\)" nil t) nil)))))))
+
+(defun scan-package-file (packages file)
+  "Return a list of all comma-separated entries appearing after `%'s in FILE in lines defining packages in PACKAGES."
+  ;; Make sure we're sorted
+  (setq packages (sort packages 'string<))
+  (let ((result ()))
+    (with-temp-buffer
+      (insert-file-contents file)
+      ;; Make sure we're sorted here too
+      (package-and-class-sort)
+      (goto-char (point-min))
+      (dolist (p packages)
+        (when (and (re-search-forward (concat "^\\\\\\(usepackage\\|documentclass\\){"
+                                           (regexp-quote p)) nil t)
+                   (search-forward "%" (line-end-position) t))
+          (setq result
+                (append result
+                        (split-string
+                         (buffer-substring-no-properties (point) (line-end-position))
+                         ","))))))
+    (remove-duplicates result)
+    result))
+
+(defun read-lines (file)
+  "Read lines of file into a list and return it."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (split-string (buffer-string) "\n" t)))
+
+(defun scan-for-defined-envs ()
+  "Return a list of all environments defined by `\\\(re\)newenvironment's in the current buffer."
+  (let ((res))
+    (save-restriction
+      (save-match-data
+        (save-mark-and-excursion
+          (goto-char (point-min))
+          (while (re-search-forward "\\\\r?e?newenvironment" nil t)
+            (push (car (split-string (shloop-latex-arg) nil nil "[{}]")) res)))))
+        (reverse res)))
+
+(defun scan-for-packages ()
+  "Return a list of all packages `\\usepackage'd in current buffer."
+  (let ((res))
+    (save-restriction
+      (save-match-data
+        (save-mark-and-excursion
+          (goto-char (point-min))
+          (while (re-search-forward "\\\\usepackage" nil t)
+            (while (not (eq (char-after) ?{)) (forward-sexp))
+            (push (car (split-string (shloop-latex-arg) nil nil "[{}]")) res)))))
+    (reverse res)))
+
+(defun get-document-class ()
+  "Return a singleton list with the document class of this document or `nil'."
+  (save-mark-and-excursion
+    (save-match-data
+      (goto-char (point-min))
+      (when (search-forward "\\documentclass")
+        (while (not (eq (char-after) ?{)) (forward-sexp))
+        ;; list car is just to make it clearer what's happening
+        (list (car (split-string (shloop-latex-arg) nil nil "[{}]")))))))
+
+(defun get-package-matches (pkglist name)
+  "Return all elements of PKGLIST (minus final `%.*') which start with `\\usepackage' include NAME after a `%' in a comma-separated list."
+  (mapcar (lambda (x) (car (split-string x "%")))
+          (dofilter (pkg pkglist)
+            (and (string-prefix-p "\\usepackage" pkg)
+                 (member name (split-string (car (last (split-string pkg "%"))) ","))))))
+
+(defun singleton-or-prompt (l prompt)
+  "L should be a list of strings. If L is a singleton, return it, otherwise prompt with PROMPT for an element to choose. If L is empty, return nil."
+  ;; Adapted from `select-cmds-from-cmdlist'. Something should probably be factored out.
+  (when l
+    (if (= (length l) 1)
+        (car l)
+      (setq prompt (concat (list-of-things l) "\n" prompt))
+      (let ((choice (nth
+                     (- (prompt-for-number prompt 1 (length l)) 1)
+                     l)))
+        choice))))
+
+(defun choose-and-add-package-or-class (cmd &optional package-file class pkgchoice)
+  "Prompt for a package (or if CLASS, document class) from PACKAGE-FILE and add cmd to it. Create a new package or class if necessary. Then sort the package file. Return a newline-terminated message explaining what happened. If PKGCHOICE is non-nil, use that as chosen package or document class instead of prompting."
+  (unless package-file (setq package-file cmdlist-package-file))
+  (let ((pkg
+         (or pkgchoice
+             (completing-read
+              (concat "Choose a " (if class "document class" "package") ": ")
+              (dofilter (x (read-lines package-file))
+                (or
+                 (and (not class) (string-prefix-p "\\usepackage" x))
+                 (and class (string-prefix-p "\\documentclass" x))))))))
+    (with-temp-buffer
+      (insert-file-contents package-file)
+      (if (or (string-prefix-p "\\usepackage" pkg)
+              (string-prefix-p "\\documentclass" pkg))
+          ;; We are adding to an existing line.
+          (progn (goto-char (point-min))
+                 (search-forward pkg)
+                 (beginning-of-line)
+                 (re-search-forward "%\\(.*\\)$")
+                 (replace-match
+                  (save-match-data
+                    (mapconcat 'identity
+                               (sort (append (split-string (match-string 1) ",") (list cmd))
+                                     'string<)
+                               ","))
+                  t t nil 1))
+        ;; We are starting a new line.
+        (goto-char (point-max))
+        (unless (eq (char-before) ?\n) (insert "\n"))
+        (insert (if class "\\documentclass{" "\\usepackage{") pkg "}%" cmd "\n"))
+      (package-and-class-sort)
+      (write-file package-file))
+    (concat "`" cmd "' added to package `" pkg "'\n")))
+
+(defun act-on-orphaned-command (c-or-e &optional prompt heading package-file builtin-file)
+  "Give the option of assign the given command or environment name to a package, or to add it to the list of builtin commands. Return a newline-terminated message saying what happened."
+  (unless prompt (setq prompt ""))
+  (unless heading (setq heading cmdlist-package-heading))
+  (unless package-file (setq package-file cmdlist-package-file))
+  (unless builtin-file (setq builtin-file cmdlist-builtin-file))
+  ;; Prompt to add new builtin or add to a package
+  (let ((decision
+         (read-char (concat prompt
+                            "Command or environment `" c-or-e "' not found.\n"
+                            "What to do?\n"
+                            "(p) assign a package to it\n"
+                            "(d) assign to current documentclass\n"
+                            "(D) assign a documentclass to it\n"
+                            "(b) add it as a builtin\n"
+                            "(↵) do nothing"))))
+    (cond
+     ((eq decision ?p)
+      (choose-and-add-package-or-class c-or-e package-file nil))
+    ((eq decision ?D)
+     (choose-and-add-package-or-class c-or-e package-file t))
+    ((eq decision ?d)
+     (choose-and-add-package-or-class c-or-e package-file t
+                                      (concat "\\documentclass{" (car (get-document-class)) "}")))
+    ((eq decision ?b)
+     (with-temp-buffer
+       (insert-file-contents builtin-file)
+       (goto-char (point-max))
+       (insert c-or-e "\n")
+       (let ((sort-fold-case t))
+         (sort-lines nil (point-min) (point-max)))
+       (write-file builtin-file))
+     (concat "`" c-or-e "' added as builtin\n")))))
+
+(defun cmdlist-buffer-provided-cmds (&optional package-file builtin-file)
+  "Get all commands which are defined or provided for in this buffer."
+  (unless package-file (setq package-file cmdlist-package-file))
+  (unless builtin-file (setq builtin-file cmdlist-builtin-file))
+  (append (read-lines builtin-file)
+          ;; TODO: This is wasteful. These should be combined into a single command.
+          (mapcar 'newcmd-name (scan-for-newcmds))
+          (mapcar 'newcmd-name (scan-for-newthms))
+          (scan-for-defined-envs)
+          (scan-package-file (append (scan-for-packages) (get-document-class))
+                             package-file)))
+
+(defun cmdlist-package-update-latex-buffer (&optional heading package-file builtin-file)
+  "Add to current buffer all ``\\usepackage's defined in PACKAGE-FILE (default is `cmdlist-package-file') under HEADING (default is `cmdlist-package-heading') which provide commands or environments present in the current file and not built-in (according to BUITLIN-FILE, default `cmdlist-builtin-file') or already defined. Prompt to act on any unmatched commands or enviornments."
+  (interactive)
+  ;; This is adapted from `cmdlist-update-latex-buffer'. Perhaps something should be factored out?
+  (unless heading (setq heading cmdlist-package-heading))
+  (unless package-file (setq package-file cmdlist-package-file))
+  (unless builtin-file (setq builtin-file cmdlist-builtin-file))
+  (let ((cmds-and-envs (append (scan-for-latex-cmds) (scan-for-latex-envs)))
+        (exceptions (cmdlist-buffer-provided-cmds package-file builtin-file))
+        (curex "")
+        (lastmessage ""))
+    (setq cmds-and-envs (remove-duplicates (sort cmds-and-envs 'string<)))
+    (setq exceptions (remove-duplicates (sort exceptions 'string<)))
+    (dolist (c-or-e cmds-and-envs)
+      ;; Check if c-or-e is an exception
+      (unless (progn
+                (while (and (string< curex c-or-e)
+                            exceptions)
+                  (setq curex (pop exceptions)))
+                (string= curex c-or-e))
+        ;; Find a matching package
+        (let ((pkgmatch (singleton-or-prompt
+                         (get-package-matches (read-lines package-file) c-or-e)
+                         (concat "\n Multiple packages provide `" c-or-e "'. Choose one: "))))
+          ;; If we found one, add it, and refresh exceptions.
+          (if pkgmatch
+              (progn
+                (stick-at-top heading pkgmatch)
+                (setq exceptions (cmdlist-buffer-provided-cmds package-file builtin-file))
+                (setq exceptions (remove-duplicates (sort exceptions 'string<)))
+                (setq curex ""))
+            ;; Otherwise, act on it
+            (save-mark-and-excursion
+              (save-match-data
+                ;; Display the command in question in the buffer
+                (goto-char (point-min))
+                (re-search-forward (concat "\\\\\\(begin{\\)?{?"
+                                           (regexp-quote c-or-e)
+                                           "\\($\\|[^a-zA-Z]\\)"))
+                (setq lastmessage
+                      (act-on-orphaned-command
+                       c-or-e lastmessage heading package-file builtin-file))))))))))
+
+(defun cmdlist-package-handle-command (&optional c-or-e heading package-file builtin-file)
+  "Like `cmdlist-package-update-latex-buffer', but only do it for given command. If C-OR-E is nil, prompt for command, defaulting to command at point."
+  ;; Some of this should probably be factored out too.
+  (interactive)
+  (unless c-or-e
+    (setq c-or-e (read-from-minibuffer "Name of command or environment to handle? \\" (latex-cmd-under-point)))
+  (unless heading (setq heading cmdlist-package-heading))
+  (unless package-file (setq package-file cmdlist-package-file))
+  (unless builtin-file (setq builtin-file cmdlist-builtin-file))
+  (let ((exceptions (cmdlist-buffer-provided-cmds package-file builtin-file)))
+    (if (member c-or-e exceptions)
+        ;; Nothing to do
+        (message "%s" (concat "`" c-or-e "' already defined or provided"))
+      ;; Find a matching package
+      (let ((pkgmatch (singleton-or-prompt
+                       (get-package-matches (read-lines package-file) c-or-e)
+                       (concat "\n Multiple packages provide `" c-or-e "'. Choose one: "))))
+        ;; If we found one, add it
+        (if pkgmatch
+            (stick-at-top heading pkgmatch)
+          (message "%s" (act-on-orphaned-command
+                         c-or-e nil heading package-file builtin-file))))))))
+
+(provide 'cmdlist)
