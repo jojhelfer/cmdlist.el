@@ -808,12 +808,13 @@ The name and letter are queried for, and by default are both the latex macro und
          (or pkgchoice
              (completing-read
               (concat "Choose a " (if class "document class" "package") ": ")
-              (dofilter (x (read-lines package-file))
+              (dofilter (x (when (file-exists-p package-file) (read-lines package-file)))
                 (or
                  (and (not class) (string-prefix-p "\\usepackage" x))
                  (and class (string-prefix-p "\\documentclass" x))))))))
-    (with-temp-buffer
-      (insert-file-contents package-file)
+    (with-temp-file package-file
+      (when (file-exists-p package-file)
+        (insert-file-contents package-file))
       (if (or (string-prefix-p "\\usepackage" pkg)
               (string-prefix-p "\\documentclass" pkg))
           ;; We are adding to an existing line.
@@ -830,10 +831,10 @@ The name and letter are queried for, and by default are both the latex macro und
                   t t nil 1))
         ;; We are starting a new line.
         (goto-char (point-max))
-        (unless (eq (char-before) ?\n) (insert "\n"))
+        ;; In case the file is not newline-terminated as it should be
+        (unless (or (eq (point) (point-min)) (eq (char-before) ?\n)) (insert "\n"))
         (insert (if class "\\documentclass{" "\\usepackage{") pkg "}%" cmd "\n"))
-      (package-and-class-sort)
-      (write-file package-file))
+      (package-and-class-sort))
     (concat "`" cmd "' added to package `" pkg "'\n")))
 
 (defun act-on-orphaned-command (c-or-e &optional prompt heading package-file builtin-file)
@@ -861,26 +862,29 @@ The name and letter are queried for, and by default are both the latex macro und
      (choose-and-add-package-or-class c-or-e package-file t
                                       (concat "\\documentclass{" (car (get-document-class)) "}")))
     ((eq decision ?b)
-     (with-temp-buffer
-       (insert-file-contents builtin-file)
+     (with-temp-file builtin-file
+       (when (file-exists-p builtin-file)
+         (insert-file-contents builtin-file))
        (goto-char (point-max))
+        ;; In case the file is not newline-terminated as it should be
+        (unless (or (eq (point) (point-min)) (eq (char-before) ?\n)) (insert "\n"))
        (insert c-or-e "\n")
        (let ((sort-fold-case t))
-         (sort-lines nil (point-min) (point-max)))
-       (write-file builtin-file))
+         (sort-lines nil (point-min) (point-max))))
      (concat "`" c-or-e "' added as builtin\n")))))
 
 (defun cmdlist-buffer-provided-cmds (&optional package-file builtin-file)
   "Get all commands which are defined or provided for in this buffer."
   (unless package-file (setq package-file cmdlist-package-file))
   (unless builtin-file (setq builtin-file cmdlist-builtin-file))
-  (append (read-lines builtin-file)
+  (append (when (file-exists-p builtin-file) (read-lines builtin-file))
           ;; TODO: This is wasteful. These should be combined into a single command.
           (mapcar 'newcmd-name (scan-for-newcmds))
           (mapcar 'newcmd-name (scan-for-newthms))
           (scan-for-defined-envs)
-          (scan-package-file (append (scan-for-packages) (get-document-class))
-                             package-file)))
+          (when (file-exists-p package-file)
+            (scan-package-file (append (scan-for-packages) (get-document-class))
+                               package-file))))
 
 (defun cmdlist-package-update-latex-buffer (&optional heading package-file builtin-file)
   "Add to current buffer all ``\\usepackage's defined in PACKAGE-FILE (default is `cmdlist-package-file') under HEADING (default is `cmdlist-package-heading') which provide commands or environments present in the current file and not built-in (according to BUITLIN-FILE, default `cmdlist-builtin-file') or already defined. Prompt to act on any unmatched commands or enviornments."
@@ -904,7 +908,8 @@ The name and letter are queried for, and by default are both the latex macro und
                 (string= curex c-or-e))
         ;; Find a matching package
         (let ((pkgmatch (singleton-or-prompt
-                         (get-package-matches (read-lines package-file) c-or-e)
+                         (get-package-matches
+                          (when (file-exists-p package-file) (read-lines package-file)) c-or-e)
                          (concat "\n Multiple packages provide `" c-or-e "'. Choose one: "))))
           ;; If we found one, add it, and refresh exceptions.
           (if pkgmatch
@@ -940,7 +945,8 @@ The name and letter are queried for, and by default are both the latex macro und
         (message "%s" (concat "`" c-or-e "' already defined or provided"))
       ;; Find a matching package
       (let ((pkgmatch (singleton-or-prompt
-                       (get-package-matches (read-lines package-file) c-or-e)
+                         (get-package-matches
+                          (when (file-exists-p package-file) (read-lines package-file)) c-or-e)
                        (concat "\n Multiple packages provide `" c-or-e "'. Choose one: "))))
         ;; If we found one, add it
         (if pkgmatch
