@@ -837,6 +837,9 @@ The name and letter are queried for, and by default are both the latex macro und
       (package-and-class-sort))
     (concat "`" cmd "' added to package `" pkg "'\n")))
 
+(defun local-cmds-filename ()
+  (concat "/tmp/" (replace-regexp-in-string "/" ":" (buffer-file-name)) ".tmp.commands"))
+
 (defun act-on-orphaned-command (c-or-e &optional prompt heading package-file builtin-file)
   "Give the option of assign the given command or environment name to a package, or to add it to the list of builtin commands. Return a newline-terminated message saying what happened."
   (unless prompt (setq prompt ""))
@@ -852,6 +855,7 @@ The name and letter are queried for, and by default are both the latex macro und
                             "(d) assign to current documentclass\n"
                             "(D) assign a documentclass to it\n"
                             "(b) add it as a builtin\n"
+                            "(f) add it as a a file-local command\n"
                             "(↵) do nothing"))))
     (cond
      ((eq decision ?p)
@@ -861,6 +865,14 @@ The name and letter are queried for, and by default are both the latex macro und
     ((eq decision ?d)
      (choose-and-add-package-or-class c-or-e package-file t
                                       (concat "\\documentclass{" (car (get-document-class)) "}")))
+    ((eq decision ?f)
+     (let ((fname (local-cmds-filename)))
+       (with-temp-file fname
+         (when (file-exists-p fname)
+               (insert-file fname))
+        ;; In case the file is not newline-terminated as it should be
+        (unless (or (eq (point) (point-min)) (eq (char-before) ?\n)) (insert "\n"))
+         (insert c-or-e "\n"))))
     ((eq decision ?b)
      (with-temp-file builtin-file
        (when (file-exists-p builtin-file)
@@ -884,7 +896,9 @@ The name and letter are queried for, and by default are both the latex macro und
           (scan-for-defined-envs)
           (when (file-exists-p package-file)
             (scan-package-file (append (scan-for-packages) (get-document-class))
-                               package-file))))
+                               package-file))
+          (let ((fname (local-cmds-filename)))
+            (when (file-exists-p fname) (read-lines fname)))))
 
 (defun cmdlist-package-update-latex-buffer (&optional heading package-file builtin-file)
   "Add to current buffer all ``\\usepackage's defined in PACKAGE-FILE (default is `cmdlist-package-file') under HEADING (default is `cmdlist-package-heading') which provide commands or environments present in the current file and not built-in (according to BUITLIN-FILE, default `cmdlist-builtin-file') or already defined. Prompt to act on any unmatched commands or enviornments."
