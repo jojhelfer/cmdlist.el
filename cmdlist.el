@@ -58,6 +58,9 @@
 ;; TODO Allow indicating that packages/classes include other packages
 ;; TODO Ignore commands used in comments
 
+;; We use some cl stuff
+(require 'cl)
+
 ;;;;;;;;;;;;;;;
 ;; Variables ;;
 ;;;;;;;;;;;;;;;
@@ -97,6 +100,18 @@
 
 (defvar cmdlist-builtin-file "~/.latex-builtins"
   "File containing a list of built-in latex commands and environments, one per line.")
+
+(defvar cmdlist-cmd-defining-cmds
+  (list "let" "def"
+        (list "newif"
+              (lambda (cmd)
+                ;; Remove starting backslash if its there
+                (when (string-prefix-p "\\" cmd) (setq cmd (substring cmd 1)))
+                (append (list cmd)
+                        (when (>= (length cmd) 2)
+                          (let ((cmdnoif (substring cmd 2)))
+                            (list cmd (concat cmdnoif "true") (concat cmdnoif "false"))))))))
+  "List of commands (besides `\(re\)newcommand' and `newtheorem') which define a new command (with a backslash). Each entry also be a list (cmd fun) where cmd is the name of the command, nobs indicates the arugment of cmd does not have a backslash, and fun takes its argument and returns a list of commands it defines.")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; General utility functions ;;
@@ -178,7 +193,11 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 ;;;;;;;;;;;;;;;;;;;;;;
 
 (defun shloop-latex-arg ()
-    "Move past the latex argument (bracket expression, command name, or single character) starting under point, and return it"
+  "Move past the latex argument (bracket expression, command name, or single character) starting under point, and return it"
+  ;; Move past any spaces and comments
+  (while
+      (cond ((eq (char-after) ? ) (forward-char) t))
+    (cond ((eq (char-after) ?%) (forward-line) t)))
   (let ((start (point)))
     (cond
      ((eq (char-after) ?\{) (forward-brexp))
@@ -278,7 +297,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
       (insert cmd)
       (goto-char (point-min))
       (re-search-forward "\\\\r?e?newcommand\\|\\\\newtheorem")
-      (car (split-string (shloop-latex-arg) nil nil "[{}]?\\\\?")))))
+      (car (split-string (shloop-latex-arg) nil nil "[{}]*\\\\?")))))
 
 (defun scan-for-newcmds ()
   "Return a list of all \\newcommmands in the current buffer"
@@ -885,6 +904,33 @@ The name and letter are queried for, and by default are both the latex macro und
          (sort-lines nil (point-min) (point-max))))
      (concat "`" c-or-e "' added as builtin\n")))))
 
+(defun scan-for-other-defined-cmds ()
+  "Return a list of all commands defined in the current buffer using commands in `cmdlist-cmd-defining-cmds'."
+  ;; This is adapted from scan-for-newcmds. Perhaps something should be factored out?
+  (let* ((res)
+         (cmds (mapcar (lambda (x) (if (stringp x) x (car x))) cmdlist-cmd-defining-cmds))
+         (regx (concat "\\\\\\(" (mapconcat 'regexp-quote cmds "\\|") "\\)[^a-z]")))
+    (save-everything
+      (goto-char (point-min))
+      (while (re-search-forward regx nil t)
+        (let ((match (match-string-no-properties 1))
+              (defined-cmd
+                (progn
+                  ;; Take back the "look-ahead" in the regex
+                  (backward-char)
+                  ;; Remove any surrounding brackets and backslashes
+                  (car (split-string (shloop-latex-arg) nil nil "\\\\?[{}]*")))))
+          (if (member match cmdlist-cmd-defining-cmds)
+              (push defined-cmd res)
+            (let ((generated-cmds
+                   (funcall (nth 1 (car (member-if (lambda (x)
+                                                     (and (listp x)
+                                                          (string= (car x) match)))
+                                                   cmdlist-cmd-defining-cmds)))
+                            defined-cmd)))
+              (dolist (c generated-cmds) (push c res)))))))
+    (reverse res)))
+
 (defun cmdlist-buffer-provided-cmds (&optional package-file builtin-file)
   "Get all commands which are defined or provided for in this buffer."
   (unless package-file (setq package-file cmdlist-package-file))
@@ -893,6 +939,7 @@ The name and letter are queried for, and by default are both the latex macro und
           ;; TODO: This is wasteful. These should be combined into a single command.
           (mapcar 'newcmd-name (scan-for-newcmds))
           (mapcar 'newcmd-name (scan-for-newthms))
+          (scan-for-other-defined-cmds)
           (scan-for-defined-envs)
           (when (file-exists-p package-file)
             (scan-package-file (append (scan-for-packages) (get-document-class))
