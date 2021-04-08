@@ -48,14 +48,11 @@
 ;; TODO Adapt sort-newcmds for \\usepackage (or maybe not since we are not sorting packages now)
 ;; TODO Update documentation for theorem and package handling
 ;; TODO Include compile-update-and-save helper functions
-;; TODO Handle \let and \def commands while scanning commands for package handling
 ;; TODO Maybe handle commands with non [a-zA-Z] characters (like @) in the name
-;; TODO Also just read latex arguments better, e.g., skipping initial whitespace
 ;; TODO Add commands to clean unused theorems and packages
 ;; TODO Try to guess command provider by looking through package/class files
-;; TODO Allow annotating usepackage with provided commands, and adding to these automatically
+;; TODO Allow annotating usepackage with provided commands (and adding to these automatically?)
 ;; TODO Create temporary latex file for testing commands to see where they come from
-;; TODO Allow indicating that packages/classes include other packages
 ;; TODO Ignore commands used in comments
 
 ;; We use some cl stuff
@@ -745,10 +742,22 @@ The name and letter are queried for, and by default are both the latex macro und
                      (and (re-search-forward
                            "^\\\\\\(usepackage\\|documentclass\\)" nil t) nil)))))))
 
-(defun scan-package-file (packages file)
-  "Return a list of all comma-separated entries appearing after `%'s in FILE in lines defining packages in PACKAGES."
+(defun scan-package-file (packages &optional recurse file pkgs-instead)
+  "Return a list of all comma-separated entries appearing after `%'s in FILE (default is `cmdlist-package-file') in lines defining packages in PACKAGES. If RECURSE is non-nil, also recursively include entries appearing in packages appearing after the second `%' in some line. If PKGS-INSTEAD is non-nil, return the entries after the second `%' instead of the first."
+  (unless file (setq file cmdlist-package-file))
+  ;; If we're recursing, add all packages.
+  (when recurse
+    (let ((new-pkgs packages))
+      (while new-pkgs
+        (let ((newer-pkgs ()))
+          (dolist (p (scan-package-file new-pkgs nil file t))
+            (when (not (member p packages))
+              (push p packages)
+              (push p newer-pkgs)))
+          (setq new-pkgs newer-pkgs)))))
   ;; Make sure we're sorted
-  (setq packages (sort packages 'string<))
+  ;; Warning! (sort) is destructive! (It returns the sorted list, but mangles the original one!)
+  (setq packages (seq-sort 'string< packages))
   (let ((result ()))
     (with-temp-buffer
       (insert-file-contents file)
@@ -757,21 +766,46 @@ The name and letter are queried for, and by default are both the latex macro und
       (goto-char (point-min))
       (dolist (p packages)
         (when (and (re-search-forward (concat "^\\\\\\(usepackage\\|documentclass\\){"
-                                           (regexp-quote p)) nil t)
+                                              (regexp-quote p) "}") nil t)
                    (search-forward "%" (line-end-position) t))
           (setq result
                 (append result
                         (split-string
-                         (buffer-substring-no-properties (point) (line-end-position))
-                         ","))))))
-    (remove-duplicates result)
-    result))
+                         (or (nth (if pkgs-instead 2 1)
+                                  (split-string (thing-at-point 'line t) "%" nil (string ?\n)))
+                             "") "," t)))))
+      (remove-duplicates result))))
 
-(defun read-lines (file)
-  "Read lines of file into a list and return it."
+(defun match-in-package-file (name &optional recurse file)
+  "Return a list of all lines (minus final `%.*' in FILE (default `cmdlist-package-file)) which start with `\\usepackage' and include NAME in a comma-separated list after a `%'. If RECURSE is non-nil, also recursively return any lines which have a package after their second `%' which provides NAME."
+  (unless file (setq file cmdlist-package-file))
   (with-temp-buffer
     (insert-file-contents file)
-    (split-string (buffer-string) "\n" t)))
+    (let ((res) ;; result
+          (names (list name)) ;; List of all names we're looking for
+          (pkgs-for-rec ()) ;; List of all packages we are recursively looking for
+          (is-pkg nil)) ;; Whether we're currently looking for a package.
+      (while (setq name (pop names))
+        (while (re-search-forward
+                (concat "^\\(\\\\usepackage{\\([^}]*\\)}\\)%"
+                        (when is-pkg "[^%]*%")
+                        "\\([^%]*,\\)?"
+                        (regexp-quote name)
+                        "\\([,%]\\|\n\\)")
+                nil t)
+          (push (match-string 1) res)
+          (when (and recurse (not (member (match-string 2) pkgs-for-rec)))
+            (push (match-string 2) names)
+            (push (match-string 2) pkgs-for-rec)))
+        (setq is-pkg t))
+      res)))
+
+(defun read-lines (file)
+  "Read lines of file into a list and return it, or nil if file does not exist."
+  (when (file-exists-p file)
+    (with-temp-buffer
+      (insert-file-contents file)
+      (split-string (buffer-string) "\n" t))))
 
 (defun scan-for-defined-envs ()
   "Return a list of all environments defined by `\\\(re\)newenvironment's in the current buffer."
@@ -801,13 +835,6 @@ The name and letter are queried for, and by default are both the latex macro und
       ;; list car is just to make it clearer what's happening
       (list (car (split-string (shloop-latex-arg) nil nil "[{}]"))))))
 
-(defun get-package-matches (pkglist name)
-  "Return all elements of PKGLIST (minus final `%.*') which start with `\\usepackage' include NAME after a `%' in a comma-separated list."
-  (mapcar (lambda (x) (car (split-string x "%")))
-          (dofilter (pkg pkglist)
-            (and (string-prefix-p "\\usepackage" pkg)
-                 (member name (split-string (car (last (split-string pkg "%"))) ","))))))
-
 (defun singleton-or-prompt (l prompt)
   "L should be a list of strings. If L is a singleton, return it, otherwise prompt with PROMPT for an element to choose. If L is empty, return nil."
   ;; Adapted from `select-cmds-from-cmdlist'. Something should probably be factored out.
@@ -827,7 +854,7 @@ The name and letter are queried for, and by default are both the latex macro und
          (or pkgchoice
              (completing-read
               (concat "Choose a " (if class "document class" "package") ": ")
-              (dofilter (x (when (file-exists-p package-file) (read-lines package-file)))
+              (dofilter (x (read-lines package-file))
                 (or
                  (and (not class) (string-prefix-p "\\usepackage" x))
                  (and class (string-prefix-p "\\documentclass" x))))))))
@@ -840,12 +867,13 @@ The name and letter are queried for, and by default are both the latex macro und
           (progn (goto-char (point-min))
                  (search-forward pkg)
                  (beginning-of-line)
-                 (re-search-forward "%\\(.*\\)$")
+                 (re-search-forward "%\\([^%]*\\)\\(%\\|$\\)" (line-end-position))
                  (replace-match
                   (save-match-data
                     (mapconcat 'identity
-                               (sort (append (split-string (match-string 1) ",") (list cmd))
-                                     'string<)
+                               ;; Warning! (sort) is destructive! (see above warning)
+                               (seq-sort 'string<
+                                         (append (split-string (match-string 1) ",") (list cmd)))
                                ","))
                   t t nil 1))
         ;; We are starting a new line.
@@ -935,17 +963,15 @@ The name and letter are queried for, and by default are both the latex macro und
   "Get all commands which are defined or provided for in this buffer."
   (unless package-file (setq package-file cmdlist-package-file))
   (unless builtin-file (setq builtin-file cmdlist-builtin-file))
-  (append (when (file-exists-p builtin-file) (read-lines builtin-file))
+  (append (read-lines builtin-file)
           ;; TODO: This is wasteful. These should be combined into a single command.
           (mapcar 'newcmd-name (scan-for-newcmds))
           (mapcar 'newcmd-name (scan-for-newthms))
           (scan-for-other-defined-cmds)
           (scan-for-defined-envs)
           (when (file-exists-p package-file)
-            (scan-package-file (append (scan-for-packages) (get-document-class))
-                               package-file))
-          (let ((fname (local-cmds-filename)))
-            (when (file-exists-p fname) (read-lines fname)))))
+            (scan-package-file (append (scan-for-packages) (get-document-class)) t package-file))
+          (read-lines (local-cmds-filename))))
 
 (defun cmdlist-package-update-latex-buffer (&optional heading package-file builtin-file)
   "Add to current buffer all ``\\usepackage's defined in PACKAGE-FILE (default is `cmdlist-package-file') under HEADING (default is `cmdlist-package-heading') which provide commands or environments present in the current file and not built-in (according to BUITLIN-FILE, default `cmdlist-builtin-file') or already defined. Prompt to act on any unmatched commands or enviornments."
@@ -958,8 +984,9 @@ The name and letter are queried for, and by default are both the latex macro und
         (exceptions (cmdlist-buffer-provided-cmds package-file builtin-file))
         (curex "")
         (lastmessage ""))
-    (setq cmds-and-envs (remove-duplicates (sort cmds-and-envs 'string<)))
-    (setq exceptions (remove-duplicates (sort exceptions 'string<)))
+    ;; Warning! (sort) is destructive! (see above warning)
+    (setq cmds-and-envs (remove-duplicates (seq-sort 'string< cmds-and-envs)))
+    (setq exceptions (remove-duplicates (seq-sort 'string< exceptions)))
     (dolist (c-or-e cmds-and-envs)
       ;; Check if c-or-e is an exception
       (unless (progn
@@ -969,15 +996,16 @@ The name and letter are queried for, and by default are both the latex macro und
                 (string= curex c-or-e))
         ;; Find a matching package
         (let ((pkgmatch (singleton-or-prompt
-                         (get-package-matches
-                          (when (file-exists-p package-file) (read-lines package-file)) c-or-e)
-                         (concat "\n Multiple packages provide `" c-or-e "'. Choose one: "))))
+                         (match-in-package-file c-or-e t package-file)
+                         (concat "\n Multiple packages provide `"
+                                 c-or-e "'. Choose one: "))))
           ;; If we found one, add it, and refresh exceptions.
           (if pkgmatch
               (progn
                 (stick-at-top heading pkgmatch)
                 (setq exceptions (cmdlist-buffer-provided-cmds package-file builtin-file))
-                (setq exceptions (remove-duplicates (sort exceptions 'string<)))
+                ;; Warning! (sort) is destructive! (see above warning)
+                (setq exceptions (remove-duplicates (seq-sort 'string< exceptions)))
                 (setq curex ""))
             ;; Otherwise, act on it
             (save-everything
@@ -1005,8 +1033,7 @@ The name and letter are queried for, and by default are both the latex macro und
         (message "%s" (concat "`" c-or-e "' already defined or provided"))
       ;; Find a matching package
       (let ((pkgmatch (singleton-or-prompt
-                         (get-package-matches
-                          (when (file-exists-p package-file) (read-lines package-file)) c-or-e)
+                       (match-in-package-file c-or-e t package-file)
                        (concat "\n Multiple packages provide `" c-or-e "'. Choose one: "))))
         ;; If we found one, add it
         (if pkgmatch
