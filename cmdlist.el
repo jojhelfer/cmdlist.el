@@ -605,17 +605,20 @@ The name and letter are queried for, and by default are both the latex macro und
   (interactive)
   (let ((cmd (latex-cmd-under-point)))
     (find-file-other-window (car cmdlist-files))
-    (setq cmd (completing-read "Goto command: "
-                               (mapcar 'newcmd-name (scan-for-newcmds))
-                               nil nil nil nil cmd))
-    (when cmd
-      (let ((cmd-pos))
-        (save-everything
-          (goto-char (point-min))
-          (when (re-search-forward (format "\\\\r?e?newcommand{?\\\\%s[}{\\[]" cmd) nil t)
-            (setq cmd-pos (point))))
-        (when cmd-pos
-          (goto-char cmd-pos))))))
+    ;; Use swiper if possible
+    (if (require 'swiper nil t)
+        (swiper)
+      (setq cmd (completing-read "Goto command: "
+                                 (mapcar 'newcmd-name (scan-for-newcmds))
+                                 nil nil nil nil cmd))
+      (when cmd
+        (let ((cmd-pos))
+          (save-everything
+            (goto-char (point-min))
+            (when (re-search-forward (format "\\\\r?e?newcommand{?\\\\%s[}{\\[]" cmd) nil t)
+              (setq cmd-pos (point))))
+          (when cmd-pos
+            (goto-char cmd-pos)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Environments and theorems ;;
