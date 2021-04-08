@@ -165,6 +165,14 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
           (setq count (+ count
                          (if (eq (char-before) ?\{) 1 -1))))))))
 
+(defmacro save-everything (&rest body)
+  "Save mark-and-excursion, restriction, and match-data."
+  (declare (indent 0) (debug t))
+  `(save-mark-and-excursion
+     (save-restriction
+       (save-match-data
+         ,@body))))
+
 ;;;;;;;;;;;;;;;;;;;;;;
 ;; Parsing commands ;;
 ;;;;;;;;;;;;;;;;;;;;;;
@@ -184,7 +192,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 (defun latex-cmd-under-point ()
   "If point is on a latex command, return its name, else nil"
   (let ((start (point)))
-    (save-mark-and-excursion
+    (save-everything
       (when (< (point) (point-max))
         (forward-char))
       (when (search-backward "\\" nil t)
@@ -196,7 +204,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
   "Goto beginning of first instance STRING occurring before or around point. Return nil if STRING was not found."
   (let ((len (length string))
         (start))
-    (save-mark-and-excursion
+    (save-everything
       (forward-char)
       (search-backward (substring string 0 1) nil t)
       (when (or (and (<= (+ (point) len) (point-max))
@@ -210,7 +218,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
   "Goto beginning of first instance REGEX occurring before or around point. Return nil if STRING was not found."
   (let ((start (point))
         (place))
-    (save-mark-and-excursion
+    (save-everything
       (if (re-search-backward regex nil t)
           (progn (setq place (match-beginning 0))
                  (forward-char))
@@ -226,7 +234,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
   (unless regex (setq regex "\\\\r?e?newcommand"))
   (let ((start (point))
         (beg))
-    (save-mark-and-excursion
+    (save-everything
       (when (re-search-backward-incl regex)
         (setq beg (point))
         (search-forward-regexp regex)
@@ -240,33 +248,32 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 (defun scan-for-latex-cmds (&optional ignore-newcmds)
   "Return all names of latex commands in current buffer."
   (let (cmds last-newcmd-pos)
-    (save-restriction
-      (save-mark-and-excursion
-        (when ignore-newcmds
-          (goto-char (point-max))
-          (if (not (search-backward "\\newcommand" nil t))
-              (setq ignore-newcmds nil)
-            (forward-char 11)
-            (when (eq (char-after) ?\{)
-              (forward-brexp))
-            (forward-brexp)
-            (setq last-newcmd-pos (point))))
-        (goto-char (point-min))
-        (while (search-forward "\\" nil t)
-          (let ((cmd (latex-cmd-under-point)))
-            (unless (or (not cmd)
-                        (equal cmd "")
-                        (and ignore-newcmds
-                             (< (point) last-newcmd-pos)
-                             (let ((snc (surrounding-newcmd)))
-                               (and snc
-                                    (equal cmd (newcmd-name snc))))))
-              (push cmd cmds)))))
-      (reverse (delete-dups cmds)))))
+    (save-everything
+      (when ignore-newcmds
+        (goto-char (point-max))
+        (if (not (search-backward "\\newcommand" nil t))
+            (setq ignore-newcmds nil)
+          (forward-char 11)
+          (when (eq (char-after) ?\{)
+            (forward-brexp))
+          (forward-brexp)
+          (setq last-newcmd-pos (point))))
+      (goto-char (point-min))
+      (while (search-forward "\\" nil t)
+        (let ((cmd (latex-cmd-under-point)))
+          (unless (or (not cmd)
+                      (equal cmd "")
+                      (and ignore-newcmds
+                           (< (point) last-newcmd-pos)
+                           (let ((snc (surrounding-newcmd)))
+                             (and snc
+                                  (equal cmd (newcmd-name snc))))))
+            (push cmd cmds)))))
+    (reverse (delete-dups cmds))))
 
 (defun newcmd-name (cmd)
   "Return the name of the given `\\\(re\)newcommmand' or `\\newtheorem'."
-  (save-mark-and-excursion
+  (save-everything
     (with-temp-buffer
       (insert cmd)
       (goto-char (point-min))
@@ -276,13 +283,12 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 (defun scan-for-newcmds ()
   "Return a list of all \\newcommmands in the current buffer"
   (let ((res))
-    (save-restriction
-      (save-mark-and-excursion
-        (goto-char (point-min))
-        (while (re-search-forward "\\\\r?e?newcommand" nil t)
-          (push (surrounding-newcmd) res)
-          (forward-brexp)))
-    (reverse res))))
+    (save-everything
+      (goto-char (point-min))
+      (while (re-search-forward "\\\\r?e?newcommand" nil t)
+        (push (surrounding-newcmd) res)
+        (forward-brexp)))
+    (reverse res)))
 
 (defun scan-file-for-newcmds (file)
   "Return a list of all \\newcommmands in the given file"
@@ -306,7 +312,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 (defun num-args-in-defn (defn)
   "Return the greatest argument number in the latex command definition DEFN. Only work for definitions with at most 9 arguments."
   (let ((maxnum 0))
-    (save-mark-and-excursion
+    (save-everything
       (with-temp-buffer
         (insert defn)
         (goto-char (point-min))
@@ -319,20 +325,19 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 (defun sort-newcmds (reverse beg end)
   "Variant of `sort-lines' (using the amazingly flexible `sort-subr') which keeps each (possibly multi-line) `\\newcommand' together, along with any lines before it up to the previous `\\newcommand'. Also ignores case."
   (interactive "P\nr")
-  (save-excursion
-    (save-restriction
-      (narrow-to-region beg end)
-      (goto-char (point-min))
-      (let ;; To make `end-of-line' and etc. to ignore fields.
-          ((inhibit-field-text-motion t)
-           (sort-fold-case t))
-        (sort-subr reverse 'forward-line
-                   (lambda ()
-                     (re-search-backward-incl "\\\\r?e?newcommand")
-                     (re-search-forward "\\\\r?e?newcommand")
-                     (when (eq (char-after) ?\{) (forward-brexp))
-                     (forward-brexp))
-                   (lambda () (re-search-forward "\\\\r?e?newcommand{?") nil))))))
+  (save-everything
+    (narrow-to-region beg end)
+    (goto-char (point-min))
+    (let ;; To make `end-of-line' and etc. to ignore fields.
+        ((inhibit-field-text-motion t)
+         (sort-fold-case t))
+      (sort-subr reverse 'forward-line
+                 (lambda ()
+                   (re-search-backward-incl "\\\\r?e?newcommand")
+                   (re-search-forward "\\\\r?e?newcommand")
+                   (when (eq (char-after) ?\{) (forward-brexp))
+                   (forward-brexp))
+                 (lambda () (re-search-forward "\\\\r?e?newcommand{?") nil)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Finding commands in a list of \newcommands ;;
@@ -389,26 +394,25 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
   "Stick TEXT (or each string in TEXT) after the first occurrence of HEADING, then sort it using SORTFUN if non-nil.
 If HEADING does not occur, first insert HEADING before \\begin{document}"
   (let ((starting-point))
-    (save-restriction
+    (save-everything
       (if (buffer-narrowed-p) (widen))
-      (save-excursion
-        (goto-char (point-min))
-        (unless (search-forward heading nil t)
-          (search-forward "\\begin{document}")
-          (beginning-of-line)
-          (insert (concat heading "\n\n"))
-          (forward-line -2))
-        (forward-line)
-        (setq starting-point (point))
-        (forward-line -1)
-        (search-forward "\n\n" nil t)
-        (forward-line -1)
-        (when (not (listp text))
-          (setq text (list text)))
-        (dolist (tx text)
-          (insert (concat tx "\n")))
-        (when sortfun
-          (funcall sortfun nil starting-point (point)))))))
+      (goto-char (point-min))
+      (unless (search-forward heading nil t)
+        (search-forward "\\begin{document}")
+        (beginning-of-line)
+        (insert (concat heading "\n\n"))
+        (forward-line -2))
+      (forward-line)
+      (setq starting-point (point))
+      (forward-line -1)
+      (search-forward "\n\n" nil t)
+      (forward-line -1)
+      (when (not (listp text))
+        (setq text (list text)))
+      (dolist (tx text)
+        (insert (concat tx "\n")))
+      (when sortfun
+        (funcall sortfun nil starting-point (point))))))
 
 (defun add-to-cmdlist-file (newcmd &optional file)
   "Add NEWCMD to FILE (default: the first entry in `cmdlist-files') and then sort the lines.
@@ -418,7 +422,7 @@ If the command being defined in NEWCMD is already in FILE, ask for confirmation.
   (if (and (file-readable-p file) (file-writable-p file))
       (let ((cmdlist (scan-file-for-newcmds file)))
         (if (cmdlist-already-p cmdlist newcmd)
-            (save-mark-and-excursion
+            (save-everything
               (let ((fibuf (find-file-noselect file)))
                 (with-current-buffer fibuf
                   (goto-char (point-min))
@@ -589,7 +593,7 @@ The name and letter are queried for, and by default are both the latex macro und
     (if unuseds
         (when (y-or-n-p (format "Seemingly unused commands:\n%s\nDelete? " (list-of-things unuseds)))
           (dolist (x unuseds)
-            (save-mark-and-excursion
+            (save-everything
               (goto-char (point-min))
               (search-forward x)
               (beginning-of-line)
@@ -606,7 +610,7 @@ The name and letter are queried for, and by default are both the latex macro und
                                nil nil nil nil cmd))
     (when cmd
       (let ((cmd-pos))
-        (save-mark-and-excursion
+        (save-everything
           (goto-char (point-min))
           (when (re-search-forward (format "\\\\r?e?newcommand{?\\\\%s[}{\\[]" cmd) nil t)
             (setq cmd-pos (point))))
@@ -620,13 +624,12 @@ The name and letter are queried for, and by default are both the latex macro und
 (defun scan-for-latex-envs ()
   "Return all names of latex environments in current buffer."
   (let (envs)
-    (save-restriction
-      (save-mark-and-excursion
-        (goto-char (point-min))
-        (while (search-forward "\\begin{" nil t)
-          (backward-char)
-          (push (car (split-string (shloop-latex-arg) nil nil "[{}]")) envs))))
-      (reverse (delete-dups envs))))
+    (save-everything
+      (goto-char (point-min))
+      (while (search-forward "\\begin{" nil t)
+        (backward-char)
+        (push (car (split-string (shloop-latex-arg) nil nil "[{}]")) envs)))
+    (reverse (delete-dups envs))))
 
 (defun stick-thm-at-top (text &optional style shared-counter parent-counter)
   "Run stick-at-top with TEXT and with heading set to `\theoremstyle{STYLE}' (by default, STYLE is  read from a comment at the end of text, which is removed, and is otherwise `plain'), and with no sorting. If SHARED-COUNTER is provided, add it as an optional argument after the first argument. Otherwise, if PARENT-COUNTER is provided, add it as an optional argument after the second argument. Otherwise, if `cmdlist-default-shared-counter' is non-nil, use that as SHARED-COUNTER. Otherwise, if `cmdlist-default-parent-counter' is non-nil, use that as PARENT-COUNTER."
@@ -662,13 +665,12 @@ The name and letter are queried for, and by default are both the latex macro und
   "Return a list of all `\\newtheorem's in the current buffer"
   ;; This is adapted from scan-for-newcmds. Perhaps something should be factored out?
   (let ((res))
-    (save-restriction
-      (save-mark-and-excursion
-        (goto-char (point-min))
-        (while (re-search-forward "\\\\newtheorem" nil t)
-          (push (surrounding-newcmd "\\\\newtheorem") res)
-          (forward-brexp)))
-    (reverse res))))
+    (save-everything
+      (goto-char (point-min))
+      (while (re-search-forward "\\\\newtheorem" nil t)
+        (push (surrounding-newcmd "\\\\newtheorem") res)
+        (forward-brexp)))
+    (reverse res)))
 
 (defun get-unused-newthms ()
   "Return a list of `\\newtheorem's in this buffer which are (apparently) not being used."
@@ -712,7 +714,7 @@ The name and letter are queried for, and by default are both the latex macro und
 
 (defun package-and-class-sort ()
   "Sort lines in buffer ignoring initial `\\usepackage' or `\\documentclass'."
-  (save-mark-and-excursion
+  (save-everything
     (goto-char (point-min))
     (let ((sort-fold-case t))
       (sort-subr nil 'forward-line 'end-of-line
@@ -752,35 +754,30 @@ The name and letter are queried for, and by default are both the latex macro und
 (defun scan-for-defined-envs ()
   "Return a list of all environments defined by `\\\(re\)newenvironment's in the current buffer."
   (let ((res))
-    (save-restriction
-      (save-match-data
-        (save-mark-and-excursion
-          (goto-char (point-min))
-          (while (re-search-forward "\\\\r?e?newenvironment" nil t)
-            (push (car (split-string (shloop-latex-arg) nil nil "[{}]")) res)))))
+    (save-everything
+      (goto-char (point-min))
+      (while (re-search-forward "\\\\r?e?newenvironment" nil t)
+        (push (car (split-string (shloop-latex-arg) nil nil "[{}]")) res)))
         (reverse res)))
 
 (defun scan-for-packages ()
   "Return a list of all packages `\\usepackage'd in current buffer."
   (let ((res))
-    (save-restriction
-      (save-match-data
-        (save-mark-and-excursion
-          (goto-char (point-min))
-          (while (re-search-forward "\\\\usepackage" nil t)
-            (while (not (eq (char-after) ?{)) (forward-sexp))
-            (push (car (split-string (shloop-latex-arg) nil nil "[{}]")) res)))))
+    (save-everything
+      (goto-char (point-min))
+      (while (re-search-forward "\\\\usepackage" nil t)
+        (while (not (eq (char-after) ?{)) (forward-sexp))
+        (push (car (split-string (shloop-latex-arg) nil nil "[{}]")) res)))
     (reverse res)))
 
 (defun get-document-class ()
   "Return a singleton list with the document class of this document or `nil'."
-  (save-mark-and-excursion
-    (save-match-data
-      (goto-char (point-min))
-      (when (search-forward "\\documentclass")
-        (while (not (eq (char-after) ?{)) (forward-sexp))
-        ;; list car is just to make it clearer what's happening
-        (list (car (split-string (shloop-latex-arg) nil nil "[{}]")))))))
+  (save-everything
+    (goto-char (point-min))
+    (when (search-forward "\\documentclass")
+      (while (not (eq (char-after) ?{)) (forward-sexp))
+      ;; list car is just to make it clearer what's happening
+      (list (car (split-string (shloop-latex-arg) nil nil "[{}]"))))))
 
 (defun get-package-matches (pkglist name)
   "Return all elements of PKGLIST (minus final `%.*') which start with `\\usepackage' include NAME after a `%' in a comma-separated list."
@@ -933,16 +930,15 @@ The name and letter are queried for, and by default are both the latex macro und
                 (setq exceptions (remove-duplicates (sort exceptions 'string<)))
                 (setq curex ""))
             ;; Otherwise, act on it
-            (save-mark-and-excursion
-              (save-match-data
-                ;; Display the command in question in the buffer
-                (goto-char (point-min))
-                (re-search-forward (concat "\\\\\\(begin{\\)?{?"
-                                           (regexp-quote c-or-e)
-                                           "\\($\\|[^a-zA-Z]\\)"))
-                (setq lastmessage
-                      (act-on-orphaned-command
-                       c-or-e lastmessage heading package-file builtin-file))))))))))
+            (save-everything
+              ;; Display the command in question in the buffer
+              (goto-char (point-min))
+              (re-search-forward (concat "\\\\\\(begin{\\)?{?"
+                                         (regexp-quote c-or-e)
+                                         "\\($\\|[^a-zA-Z]\\)"))
+              (setq lastmessage
+                    (act-on-orphaned-command
+                     c-or-e lastmessage heading package-file builtin-file)))))))))
 
 (defun cmdlist-package-handle-command (&optional c-or-e heading package-file builtin-file)
   "Like `cmdlist-package-update-latex-buffer', but only do it for given command. If C-OR-E is nil, prompt for command, defaulting to command at point."
