@@ -54,6 +54,7 @@
 ;; TODO Allow annotating usepackage with provided commands (and adding to these automatically?)
 ;; TODO Create temporary latex file for testing commands to see where they come from
 ;; TODO Ignore commands used in comments
+;; TODO Be careful about commands which are the empty string
 
 ;; We use some cl stuff
 (require 'cl)
