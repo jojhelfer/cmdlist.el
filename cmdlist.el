@@ -911,14 +911,16 @@ The name and letter are queried for, and by default are both the latex macro und
   (unless builtin-file (setq builtin-file cmdlist-builtin-file))
   ;; Prompt to add new builtin or add to a package
   (let ((decision
-         (read-char (concat prompt
+         (read-char (concat (propertize prompt 'face 'shadow)
+                            (when (> (length prompt) 0)
+                              (propertize "-------------------------------\n" 'face 'shadow))
                             "Command or environment `" c-or-e "' not found.\n"
                             "What to do?\n"
                             "(p) assign a package to it\n"
                             "(d) assign to current documentclass\n"
                             "(D) assign a documentclass to it\n"
                             "(b) add it as a builtin\n"
-                            "(f) add it as a a file-local command\n"
+                            "(f) mark it temporarily as a file-local command\n"
                             "(↵) do nothing"))))
     (cond
      ((eq decision ?p)
@@ -935,7 +937,8 @@ The name and letter are queried for, and by default are both the latex macro und
                (insert-file fname))
         ;; In case the file is not newline-terminated as it should be
         (unless (or (eq (point) (point-min)) (eq (char-before) ?\n)) (insert "\n"))
-         (insert c-or-e "\n"))))
+        (insert c-or-e "\n")))
+     (concat "`" c-or-e "' marked temporarily as a file-local command\n"))
     ((eq decision ?b)
      (with-temp-file builtin-file
        (when (file-exists-p builtin-file)
