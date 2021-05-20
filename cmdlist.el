@@ -56,7 +56,6 @@
 ;; TODO Create temporary latex file for testing commands to see where they come from
 ;; TODO Ignore commands used in comments
 ;; TODO Be careful about commands which are the empty string
-;; TODO When querying about what to do about an unrecognized command, offer to *fix* it (in case there's a typo).
 ;; TODO When jumping to the instance of a command during querying, it should be case-sensitive.
 
 ;; We use some cl stuff
@@ -903,8 +902,8 @@ The name and letter are queried for, and by default are both the latex macro und
 (defun local-cmds-filename ()
   (concat "/tmp/" (replace-regexp-in-string "/" ":" (buffer-file-name)) ".tmp.commands"))
 
-(defun act-on-orphaned-command (c-or-e &optional prompt heading package-file builtin-file)
-  "Give the option of assign the given command or environment name to a package, or to add it to the list of builtin commands. Return a newline-terminated message saying what happened."
+(defun act-on-orphaned-command (c-or-e &optional prompt heading package-file builtin-file allow-edit-here)
+  "Give the option of assign the given command or environment name to a package, or to add it to the list of builtin commands. Return a newline-terminated message saying what happened. If ALLOW-EDIT-HERE is non-nil, offer option to edit buffer at current position, and `throw' the symbol `edit-here' with the current point."
   (unless prompt (setq prompt ""))
   (unless heading (setq heading cmdlist-package-heading))
   (unless package-file (setq package-file cmdlist-package-file))
@@ -921,8 +920,11 @@ The name and letter are queried for, and by default are both the latex macro und
                             "(D) assign a documentclass to it\n"
                             "(b) add it as a builtin\n"
                             "(f) mark it temporarily as a file-local command\n"
+                            (when allow-edit-here "(e) edit the buffer here\n")
                             "(↵) do nothing"))))
     (cond
+     ((and allow-edit-here (eq decision ?e))
+      (throw 'edit-here (point)))
      ((eq decision ?p)
       (choose-and-add-package-or-class c-or-e package-file nil))
     ((eq decision ?D)
@@ -1006,36 +1008,46 @@ The name and letter are queried for, and by default are both the latex macro und
     ;; Warning! (sort) is destructive! (see above warning)
     (setq cmds-and-envs (remove-duplicates (seq-sort 'string< cmds-and-envs)))
     (setq exceptions (remove-duplicates (seq-sort 'string< exceptions)))
-    (dolist (c-or-e cmds-and-envs)
-      ;; Check if c-or-e is an exception
-      (unless (progn
-                (while (and (string< curex c-or-e)
-                            exceptions)
-                  (setq curex (pop exceptions)))
-                (string= curex c-or-e))
-        ;; Find a matching package
-        (let ((pkgmatch (singleton-or-prompt
-                         (match-in-package-file c-or-e t package-file)
-                         (concat "\n Multiple packages provide `"
-                                 c-or-e "'. Choose one: "))))
-          ;; If we found one, add it, and refresh exceptions.
-          (if pkgmatch
-              (progn
-                (stick-at-top heading pkgmatch)
-                (setq exceptions (cmdlist-buffer-provided-cmds package-file builtin-file))
-                ;; Warning! (sort) is destructive! (see above warning)
-                (setq exceptions (remove-duplicates (seq-sort 'string< exceptions)))
-                (setq curex ""))
-            ;; Otherwise, act on it
-            (save-everything
-              ;; Display the command in question in the buffer
-              (goto-char (point-min))
-              (re-search-forward (concat "\\\\\\(begin{\\)?{?"
-                                         (regexp-quote c-or-e)
-                                         "\\($\\|[^a-zA-Z]\\)"))
-              (setq lastmessage
-                    (act-on-orphaned-command
-                     c-or-e lastmessage heading package-file builtin-file)))))))))
+    ;; This catches the `edit-here' possibly thrown by `act-on-orphaned-command' and goes to the point thrown by that `throw'
+    (let ((edit-point
+           (catch 'edit-here
+             (dolist (c-or-e cmds-and-envs)
+               ;; Check if c-or-e is an exception
+               (unless (progn
+                         (while (and (string< curex c-or-e)
+                                     exceptions)
+                           (setq curex (pop exceptions)))
+                         (string= curex c-or-e))
+                 ;; Find a matching package
+                 (let ((pkgmatch (singleton-or-prompt
+                                  (match-in-package-file c-or-e t package-file)
+                                  (concat "\n Multiple packages provide `"
+                                          c-or-e "'. Choose one: "))))
+                   ;; If we found one, add it, and refresh exceptions.
+                   (if pkgmatch
+                       (progn
+                         (stick-at-top heading pkgmatch)
+                         (setq exceptions (cmdlist-buffer-provided-cmds package-file builtin-file))
+                         ;; Warning! (sort) is destructive! (see above warning)
+                         (setq exceptions (remove-duplicates (seq-sort 'string< exceptions)))
+                         (setq curex ""))
+                     ;; Otherwise, act on it
+                     (save-everything
+                       ;; Display the command in question in the buffer
+                       (goto-char (point-min))
+                       (re-search-forward (concat "\\\\\\(begin{\\)?{?"
+                                                  (regexp-quote c-or-e)
+                                                  "\\($\\|[^a-zA-Z]\\)"))
+                       (setq lastmessage
+                             (act-on-orphaned-command
+                              c-or-e lastmessage heading package-file builtin-file t))
+                       ;; This is so catch only returns non-nil in the case of a throw
+                       nil))))))))
+      (when edit-point
+        (push-mark)
+        (when (member 'evil features)
+          (evil-set-jump))
+        (goto-char edit-point)))))
 
 (defun cmdlist-package-handle-command (&optional c-or-e heading package-file builtin-file)
   "Like `cmdlist-package-update-latex-buffer', but only do it for given command. If C-OR-E is nil, prompt for command, defaulting to command at point."
@@ -1058,6 +1070,6 @@ The name and letter are queried for, and by default are both the latex macro und
         (if pkgmatch
             (stick-at-top heading pkgmatch)
           (message "%s" (act-on-orphaned-command
-                         c-or-e nil heading package-file builtin-file))))))))
+                         c-or-e nil heading package-file builtin-file nil))))))))
 
 (provide 'cmdlist)
