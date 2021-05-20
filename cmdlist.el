@@ -45,16 +45,19 @@
 ;;   (kbd "SPC g z") 'delete-unused-newcmds
 ;;   (kbd "SPC g f") 'open-cmdlist-file)
 
+;; TODO Look into just parsing the whole file, hopefully with some pre-existing tool. In particular, look into AucTeX's TeX-auto-file, TeX-auto-save, etc.
 ;; TODO Adapt sort-newcmds for \\usepackage (or maybe not since we are not sorting packages now)
 ;; TODO Update documentation for theorem and package handling
 ;; TODO Include compile-update-and-save helper functions
-;; TODO Maybe handle commands with non [a-zA-Z] characters (like @) in the name
+;; TODO Maybe handle commands with non [a-zA-Z] characters (like @ and *) in the name
 ;; TODO Add commands to clean unused theorems and packages
 ;; TODO Try to guess command provider by looking through package/class files
 ;; TODO Allow annotating usepackage with provided commands (and adding to these automatically?)
 ;; TODO Create temporary latex file for testing commands to see where they come from
 ;; TODO Ignore commands used in comments
 ;; TODO Be careful about commands which are the empty string
+;; TODO When querying about what to do about an unrecognized command, offer to *fix* it (in case there's a typo).
+;; TODO When jumping to the instance of a command during querying, it should be case-sensitive.
 
 ;; We use some cl stuff
 (require 'cl)
@@ -277,16 +280,28 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
           (setq last-newcmd-pos (point))))
       (goto-char (point-min))
       (while (search-forward "\\" nil t)
-        (let ((cmd (latex-cmd-under-point)))
-          (unless (or (not cmd)
-                      (equal cmd "")
-                      (and ignore-newcmds
-                           (< (point) last-newcmd-pos)
-                           (let ((snc (surrounding-newcmd)))
-                             (and snc
-                                  (equal cmd (newcmd-name snc))))))
-            (push cmd cmds)))))
-    (reverse (delete-dups cmds))))
+        ;; Make sure it's not a double backslash
+        (unless (and
+                 (or (eq (char-after) ?\\)
+                     ;; We were using `looking-back' here, but it turns out to be extremely slow
+                     ;; (its documentation says as much).
+                     ;; We were also using looking-at above, which seems to not be slow,
+                     ;; but is still unnecessarily regexpful
+                     (eq (char-after (- (point) 2)) ?\\))
+                 ;; Or rather, make sure it's not an even number of backslashes
+                 (let ((beg (progn (while (eq (char-before) ?\\) (backward-char)) (point)))
+                       (end (progn (while (eq (char-after) ?\\) (forward-char)) (point))))
+                   (evenp (- end beg))))
+          (let ((cmd (latex-cmd-under-point)))
+            (unless (or (not cmd)
+                        (equal cmd "")
+                        (and ignore-newcmds
+                             (< (point) last-newcmd-pos)
+                             (let ((snc (surrounding-newcmd)))
+                               (and snc
+                                    (equal cmd (newcmd-name snc))))))
+              (push cmd cmds)))))
+    (reverse (delete-dups cmds)))))
 
 (defun newcmd-name (cmd)
   "Return the name of the given `\\\(re\)newcommmand' or `\\newtheorem'."
