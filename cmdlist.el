@@ -367,7 +367,8 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
                    (re-search-backward-incl "\\\\r?e?newcommand")
                    (re-search-forward "\\\\r?e?newcommand")
                    (when (eq (char-after) ?\{) (forward-brexp))
-                   (forward-brexp))
+                   (forward-brexp)
+                   (end-of-line))
                  (lambda () (re-search-forward "\\\\r?e?newcommand{?") nil)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
