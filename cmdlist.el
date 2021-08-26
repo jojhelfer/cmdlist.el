@@ -602,10 +602,19 @@ The name and letter are queried for, and by default are both the latex macro und
   (let ((name (read-from-minibuffer "Package name? ")))
     (stick-at-top "% Packages" (concat "\\usepackage{" name "}"))))
 
-(defun get-unused-newcmds ()
-  "Return a list of `\\newcommand's in this buffer which are (apparently) not being used."
+(defun get-unused-newcmds (&optional whole-buffer)
+  "Return a list of `\\newcommand's in this buffer which are (apparently) not being used. If whole-buffer is nil, restrict to the commands under `cmdlist-heading'."
   (let* ((cmds (scan-for-latex-cmds t))
-         (newcmds (scan-for-newcmds))
+         (newcmds
+          (if whole-buffer
+              (scan-for-newcmds)
+            (save-everything
+              (goto-char (point-min))
+              (search-forward cmdlist-heading)
+              (let ((st (point)))
+                (search-forward "\n\n")
+                (narrow-to-region st (point))
+                (scan-for-newcmds)))))
          (unuseds (dofilter (x newcmds)
                     (not (member (newcmd-name x) cmds)))))
     unuseds))
@@ -702,7 +711,7 @@ The name and letter are queried for, and by default are both the latex macro und
   (let ((res))
     (save-everything
       (goto-char (point-min))
-      (while (re-search-forward "\\\\newtheorem" nil t)
+      (while (re-search-forward "\\\\newtheorem[^a-z]" nil t)
         (push (surrounding-newcmd "\\\\newtheorem") res)
         (forward-brexp)))
     (reverse res)))
