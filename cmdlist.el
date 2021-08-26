@@ -1036,9 +1036,10 @@ The name and letter are queried for, and by default are both the latex macro und
                      (save-everything
                        ;; Display the command in question in the buffer
                        (goto-char (point-min))
-                       (re-search-forward (concat "\\\\\\(begin{\\)?{?"
-                                                  (regexp-quote c-or-e)
-                                                  "\\($\\|[^a-zA-Z]\\)"))
+                       (let ((case-fold-search nil))
+                         (re-search-forward (concat "\\\\\\(begin{\\)?{?"
+                                                    (regexp-quote c-or-e)
+                                                    "\\($\\|[^a-zA-Z]\\)")))
                        (setq lastmessage
                              (act-on-orphaned-command
                               c-or-e lastmessage heading package-file builtin-file t))
