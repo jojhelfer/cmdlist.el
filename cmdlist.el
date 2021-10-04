@@ -49,7 +49,6 @@
 ;; TODO Adapt sort-newcmds for \\usepackage (or maybe not since we are not sorting packages now)
 ;; TODO Update documentation for theorem and package handling
 ;; TODO Include compile-update-and-save helper functions
-;; TODO Maybe handle commands with non [a-zA-Z] characters (like @ and *) in the name
 ;; TODO Add commands to clean unused theorems and packages
 ;; TODO Try to guess command provider by looking through package/class files
 ;; TODO Allow annotating usepackage with provided commands (and adding to these automatically?)
@@ -111,7 +110,10 @@
                         (when (>= (length cmd) 2)
                           (let ((cmdnoif (substring cmd 2)))
                             (list cmd (concat cmdnoif "true") (concat cmdnoif "false"))))))))
-  "List of commands (besides `\(re\)newcommand' and `newtheorem') which define a new command (with a backslash). Each entry also be a list (cmd fun) where cmd is the name of the command, nobs indicates the arugment of cmd does not have a backslash, and fun takes its argument and returns a list of commands it defines.")
+  "List of commands (besides `\(re\)newcommand' and `newtheorem') which define a new command (with a backslash). Each entry can also be a list (cmd fun) where cmd is the name of the command, and fun takes its argument and returns a list of commands it defines.")
+
+(defvar cmdlist-ignore-at-symbol t
+  "If non-nil, `cmdlist-package-update-latex-buffer' will ignore commands containing `@'. (Note that, in any case, `@' is always treated as part of a command name, which will be incorrect if not within `\\makeatletter' region.)")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; General utility functions ;;
@@ -203,7 +205,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
      ((eq (char-after) ?\{) (forward-brexp))
      ((eq (char-after) ?\\)
       (forward-char)
-      (re-search-forward "[^A-Za-z]")
+      (re-search-forward "[^A-Za-z@]")
       (backward-char))
      ((forward-char)))
     (buffer-substring-no-properties start (point))))
@@ -1022,12 +1024,13 @@ The name and letter are queried for, and by default are both the latex macro und
     (let ((edit-point
            (catch 'edit-here
              (dolist (c-or-e cmds-and-envs)
-               ;; Check if c-or-e is an exception
-               (unless (progn
-                         (while (and (string< curex c-or-e)
-                                     exceptions)
-                           (setq curex (pop exceptions)))
-                         (string= curex c-or-e))
+               ;; Check if c-or-e is an exception or has an @-sign
+               (unless (or (and cmdlist-ignore-at-symbol (member ?@ (string-to-list c-or-e)))
+                           (progn
+                             (while (and (string< curex c-or-e)
+                                         exceptions)
+                               (setq curex (pop exceptions)))
+                             (string= curex c-or-e)))
                  ;; Find a matching package
                  (let ((pkgmatch (singleton-or-prompt
                                   (match-in-package-file c-or-e t package-file)
