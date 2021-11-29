@@ -511,7 +511,7 @@ this macro."
     (when (and (> numargs 0)
                (y-or-n-p "Optional argument? "))
       (setq optional
-            (read-from-minibuffer (format "Deafult optional argument for \\%s[%d]? "
+            (read-from-minibuffer (format "Default optional argument for \\%s[%d]? "
                                           name numargs))))
     (assemble-newcmd name defn numargs optional)))
 
@@ -1051,7 +1051,8 @@ The name and letter are queried for, and by default are both the latex macro und
                        (let ((case-fold-search nil))
                          (re-search-forward (concat "\\\\\\(begin{\\)?{?"
                                                     (regexp-quote c-or-e)
-                                                    "\\($\\|[^a-zA-Z]\\)")))
+                                                    "\\($\\|[^a-zA-Z]\\)"))
+                         (goto-char (match-beginning 0)))
                        (setq lastmessage
                              (act-on-orphaned-command
                               c-or-e lastmessage heading package-file builtin-file t))
