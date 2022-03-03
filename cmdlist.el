@@ -791,8 +791,8 @@ The name and letter are queried for, and by default are both the latex macro und
       (insert-file-contents file)
       ;; Make sure we're sorted here too
       (package-and-class-sort)
-      (goto-char (point-min))
       (dolist (p packages)
+        (goto-char (point-min))
         (when (and (re-search-forward (concat "^\\\\\\(usepackage\\|documentclass\\){"
                                               (regexp-quote p) "}") nil t)
                    (search-forward "%" (line-end-position) t))
@@ -945,7 +945,7 @@ The name and letter are queried for, and by default are both the latex macro und
      (choose-and-add-package-or-class c-or-e package-file t))
     ((eq decision ?d)
      (choose-and-add-package-or-class c-or-e package-file t
-                                      (concat "\\documentclass{" (car (get-document-class)) "}")))
+                                      (car (get-document-class))))
     ((eq decision ?f)
      (let ((fname (local-cmds-filename)))
        (with-temp-file fname
