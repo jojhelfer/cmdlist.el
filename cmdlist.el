@@ -639,8 +639,9 @@ The name and letter are queried for, and by default are both the latex macro und
             (save-everything
               (goto-char (point-min))
               (search-forward x)
-              (beginning-of-line)
-              (kill-line 1))))
+              ; instead of kill-line, to avoid changing kill-ring
+              (delete-region (progn (beginning-of-line) (point))
+                             (1+ (progn (end-of-line) (point)))))))
       (message "No unused commands found"))))
 
 (defun open-cmdlist-file ()
