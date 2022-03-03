@@ -811,7 +811,8 @@ The name and letter are queried for, and by default are both the latex macro und
     (let ((res) ;; result
           (names (list name)) ;; List of all names we're looking for
           (pkgs-for-rec ()) ;; List of all packages we are recursively looking for
-          (is-pkg nil)) ;; Whether we're currently looking for a package.
+          (is-pkg nil) ;; Whether we're currently looking for a package.
+          (case-fold-search nil)) ;; Unfortunate that this isn't the default
       (while (setq name (pop names))
         (while (re-search-forward
                 (concat "^\\(\\\\usepackage{\\([^}]*\\)}\\)%"
