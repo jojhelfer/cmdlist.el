@@ -45,7 +45,7 @@
 ;;   (kbd "SPC g z") 'delete-unused-newcmds
 ;;   (kbd "SPC g f") 'open-cmdlist-file)
 
-;; TODO Look into just parsing the whole file, hopefully with some pre-existing tool. In particular, look into AucTeX's TeX-auto-file, TeX-auto-save, etc.
+;; TODO Look into just parsing the whole file, hopefully with some pre-existing tool. In particular, look into AucTeX's TeX-auto-file, TeX-auto-save, etc. We should also use TeX-find-macro-start and TeX-find-macro-end (and TeX-current-macro, etc.)
 ;; TODO Adapt sort-newcmds for \\usepackage (or maybe not since we are not sorting packages now)
 ;; TODO Update documentation for theorem and package handling
 ;; TODO Include compile-update-and-save helper functions
@@ -114,6 +114,9 @@
 
 (defvar cmdlist-ignore-at-symbol t
   "If non-nil, `cmdlist-package-update-latex-buffer' will ignore commands containing `@'. (Note that, in any case, `@' is always treated as part of a command name, which will be incorrect if not within `\\makeatletter' region.)")
+
+(defvar cmdlist-exceptions ()
+  "List of commands that `cmdlist-update-latex-buffer' and `delete-unused-commands' should ignore when searching the buffer for commands.")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; General utility functions ;;
@@ -525,7 +528,7 @@ By default HEADING is `cmdlist-heading' and FILES are the files in the variable 
   (unless prefix (setq prefix ""))
   (let* ((cmdlist (apply 'append (mapcar 'scan-file-for-newcmds files)))
          (cmds (scan-for-latex-cmds))
-         (exceptions (mapcar 'newcmd-name (scan-for-newcmds)))
+         (exceptions (append (mapcar 'newcmd-name (scan-for-newcmds)) cmdlist-exceptions))
          (newcmds (select-cmds-from-cmdlist cmdlist cmds exceptions)))
     (if newcmds
         (progn
@@ -606,7 +609,7 @@ The name and letter are queried for, and by default are both the latex macro und
 
 (defun get-unused-newcmds (&optional whole-buffer)
   "Return a list of `\\newcommand's in this buffer which are (apparently) not being used. If whole-buffer is nil, restrict to the commands under `cmdlist-heading'."
-  (let* ((cmds (scan-for-latex-cmds t))
+  (let* ((cmds (append (scan-for-latex-cmds t) cmdlist-exceptions))
          (newcmds
           (if whole-buffer
               (scan-for-newcmds)
