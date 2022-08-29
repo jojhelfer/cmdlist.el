@@ -58,7 +58,7 @@
 ;; TODO When jumping to the instance of a command during querying, it should be case-sensitive.
 
 ;; We use some cl stuff
-(require 'cl)
+(require 'cl-lib)
 
 ;;;;;;;;;;;;;;;
 ;; Variables ;;
@@ -292,7 +292,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
                  ;; Or rather, make sure it's not an even number of backslashes
                  (let ((beg (progn (while (eq (char-before) ?\\) (backward-char)) (point)))
                        (end (progn (while (eq (char-after) ?\\) (forward-char)) (point))))
-                   (evenp (- end beg))))
+                   (cl-evenp (- end beg))))
           (let ((cmd (latex-cmd-under-point)))
             (unless (or (not cmd)
                         (equal cmd "")
@@ -802,7 +802,7 @@ The name and letter are queried for, and by default are both the latex macro und
                          (or (nth (if pkgs-instead 2 1)
                                   (split-string (thing-at-point 'line t) "%" nil (string ?\n)))
                              "") "," t)))))
-      (remove-duplicates result))))
+      (cl-remove-duplicates result))))
 
 (defun match-in-package-file (name &optional recurse file)
   "Return a list of all lines (minus final `%.*' in FILE (default `cmdlist-package-file)) which start with `\\usepackage' and include NAME in a comma-separated list after a `%'. If RECURSE is non-nil, also recursively return any lines which have a package after their second `%' which provides NAME."
@@ -986,7 +986,7 @@ The name and letter are queried for, and by default are both the latex macro und
           (if (member match cmdlist-cmd-defining-cmds)
               (push defined-cmd res)
             (let ((generated-cmds
-                   (funcall (nth 1 (car (member-if (lambda (x)
+                   (funcall (nth 1 (car (cl-member-if (lambda (x)
                                                      (and (listp x)
                                                           (string= (car x) match)))
                                                    cmdlist-cmd-defining-cmds)))
@@ -1020,8 +1020,8 @@ The name and letter are queried for, and by default are both the latex macro und
         (curex "")
         (lastmessage ""))
     ;; Warning! (sort) is destructive! (see above warning)
-    (setq cmds-and-envs (remove-duplicates (seq-sort 'string< cmds-and-envs)))
-    (setq exceptions (remove-duplicates (seq-sort 'string< exceptions)))
+    (setq cmds-and-envs (cl-remove-duplicates (seq-sort 'string< cmds-and-envs)))
+    (setq exceptions (cl-remove-duplicates (seq-sort 'string< exceptions)))
     ;; This catches the `edit-here' possibly thrown by `act-on-orphaned-command' and goes to the point thrown by that `throw'
     (let ((edit-point
            (catch 'edit-here
@@ -1044,7 +1044,7 @@ The name and letter are queried for, and by default are both the latex macro und
                          (stick-at-top heading pkgmatch)
                          (setq exceptions (cmdlist-buffer-provided-cmds package-file builtin-file))
                          ;; Warning! (sort) is destructive! (see above warning)
-                         (setq exceptions (remove-duplicates (seq-sort 'string< exceptions)))
+                         (setq exceptions (cl-remove-duplicates (seq-sort 'string< exceptions)))
                          (setq curex ""))
                      ;; Otherwise, act on it
                      (save-everything
