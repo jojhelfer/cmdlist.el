@@ -4,7 +4,7 @@
 
 ;; Author: Joseph Helfer
 ;; URL: https://github.com/jojhelfer/cmdlist.el
-;; Version: 1.0.0
+;; Version: 1.1.0
 ;; Package-Requires: ((emacs "25.1"))
 
 ;; This file is NOT part of GNU Emacs.
@@ -122,8 +122,8 @@
 (defvar cmdlist-ignore-at-symbol t
   "If non-nil, `cmdlist-package-update-latex-buffer' will ignore commands containing `@'. (Note that, in any case, `@' is always treated as part of a command name, which will be incorrect if not within `\\makeatletter' region.)")
 
-(defvar cmdlist-exceptions ()
-  "List of commands that `cmdlist-update-latex-buffer' and `delete-unused-commands' should ignore when searching the buffer for commands.")
+(defvar cmdlist-newcommands-to-ignore ()
+  "List of commands that should not be taken from `cmdlist-files' by `cmdlist-update-latex-buffer'. This can be used, for example, to prevent a \"renewcommand\" of a builtin command from getting inserted.")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; General utility functions ;;
@@ -535,7 +535,7 @@ By default HEADING is `cmdlist-heading' and FILES are the files in the variable 
   (unless prefix (setq prefix ""))
   (let* ((cmdlist (apply 'append (mapcar 'cmdlist-scan-file-for-newcmds files)))
          (cmds (cmdlist-scan-for-latex-cmds))
-         (exceptions (append (mapcar 'cmdlist-newcmd-name (cmdlist-scan-for-newcmds)) cmdlist-exceptions))
+         (exceptions (append (mapcar 'cmdlist-newcmd-name (cmdlist-scan-for-newcmds)) cmdlist-newcommands-to-ignore))
          (newcmds (cmdlist-select-cmds-from-cmdlist cmdlist cmds exceptions)))
     (if newcmds
         (progn
@@ -616,7 +616,7 @@ The name and letter are queried for, and by default are both the latex macro und
 
 (defun cmdlist-get-unused-newcmds (&optional whole-buffer)
   "Return a list of `\\newcommand's in this buffer which are (apparently) not being used. If whole-buffer is nil, restrict to the commands under `cmdlist-heading'."
-  (let* ((cmds (append (cmdlist-scan-for-latex-cmds t) cmdlist-exceptions))
+  (let* ((cmds (cmdlist-scan-for-latex-cmds t))
          (newcmds
           (if whole-buffer
               (cmdlist-scan-for-newcmds)
@@ -674,6 +674,33 @@ The name and letter are queried for, and by default are both the latex macro und
           (when cmd-pos
             (goto-char cmd-pos)))))))
 
+(defun cmdlist-conditional-update-buffer ()
+  "If `cmdlist-heading' is present in the buffer, run `cmdlist-update-latex-buffer'. If furthermore either of \"% Theorems\" or `cmdlist-package-heading' is present, run `cmdlist-newthm-update-latex-buffer' or `cmdlist-package-update-latex-buffer', respectively."
+  (interactive)
+  (let ((has-heading nil)
+        (has-thm-heading nil)
+        (has-pkg-heading nil))
+    (save-mark-and-excursion
+      (goto-char (point-min))
+      (setq has-heading (re-search-forward (concat "^" cmdlist-heading "$") nil t))
+      (goto-char (point-min))
+      (setq has-thm-heading (re-search-forward (concat "^" "% Theorems" "$") nil t))
+      (goto-char (point-min))
+      (setq has-pkg-heading (re-search-forward (concat "^" cmdlist-package-heading "$") nil t)))
+    (when has-heading
+      (cmdlist-update-latex-buffer)
+      (when has-thm-heading
+        (cmdlist-newthm-update-latex-buffer))
+      (when has-pkg-heading
+        (cmdlist-package-update-latex-buffer)))))
+
+(defun cmdlist-update-save-and-compile ()
+  "Save buffer, run `cmdlist-conditional-update-buffer', and then compile with `Tex-command'."
+  (interactive)
+  (cmdlist-conditional-update-buffer)
+  (save-buffer)
+  (TeX-command "LaTeX" 'TeX-master-file nil))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Environments and theorems ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -689,7 +716,7 @@ The name and letter are queried for, and by default are both the latex macro und
     (reverse (delete-dups envs))))
 
 (defun cmdlist-stick-thm-at-top (text &optional style shared-counter parent-counter)
-  "Run cmdlist-stick-at-top with TEXT and with heading set to `\theoremstyle{STYLE}' (by default, STYLE is  read from a comment at the end of text, which is removed, and is otherwise `plain'), and with no sorting. If SHARED-COUNTER is provided, add it as an optional argument after the first argument. Otherwise, if PARENT-COUNTER is provided, add it as an optional argument after the second argument. Otherwise, if `cmdlist-default-shared-counter' is non-nil, use that as SHARED-COUNTER. Otherwise, if `cmdlist-default-parent-counter' is non-nil, use that as PARENT-COUNTER."
+  "Run cmdlist-stick-at-top with TEXT and with heading set to `\theoremstyle{STYLE}' (by default, STYLE is read from a comment at the end of text, which is removed, and is otherwise `plain'), and with no sorting. If SHARED-COUNTER is provided, add it as an optional argument after the first argument. Otherwise, if PARENT-COUNTER is provided, add it as an optional argument after the second argument. Otherwise, if `cmdlist-default-shared-counter' is non-nil, use that as SHARED-COUNTER. Otherwise, if `cmdlist-default-parent-counter' is non-nil, use that as PARENT-COUNTER."
   (unless (or shared-counter parent-counter)
     (setq shared-counter cmdlist-default-shared-counter)
     (setq parent-counter cmdlist-default-parent-counter))
@@ -966,7 +993,7 @@ The name and letter are queried for, and by default are both the latex macro und
                             "(d) assign to current documentclass\n"
                             "(D) assign a documentclass to it\n"
                             "(b) add it as a builtin\n"
-                            "(f) mark it temporarily as a file-local command\n"
+                            "(f) ignore it in this file for the rest of this session\n"
                             (when allow-edit-here "(t) test it in a minimal LaTeX file\n")
                             (when allow-edit-here "(e) edit the buffer here\n")
                             "(↵) do nothing"))))
