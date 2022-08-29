@@ -731,8 +731,8 @@ The name and letter are queried for, and by default are both the latex macro und
 
 (defun cmdlist-get-unused-newthms ()
   "Return a list of `\\newtheorem's in this buffer which are (apparently) not being used."
-  ;; This is adapted from `cmdlist-get-unused-newthms'. Perhaps something should be factored out?
-  (let* ((envs (cmdlist-scan-for-latex-envs))
+  ;; This is adapted from `cmdlist-get-unused-newcmds'. Perhaps something should be factored out?
+  (let* ((envs (append (cmdlist-scan-for-latex-envs) (cmdlist-get-newtheorem-dependencies)))
          (newthms (cmdlist-scan-for-newthms))
          (unuseds (cmdlist-dofilter (x newthms)
                     (not (member (cmdlist-newcmd-name x) envs)))))
