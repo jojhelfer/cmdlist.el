@@ -736,13 +736,22 @@ The name and letter are queried for, and by default are both the latex macro und
       (insert-file-contents file)
       (scan-for-newthms))))
 
+(defun get-newtheorem-dependencies ()
+  "Get all the commands included in square brackets in newtheorem commands."
+    (let (res)
+      (save-everything
+        (goto-char (point-min))
+        (while (re-search-forward "\\\\newtheorem\\*?{[a-zA-Z]*}\\[\\([a-zA-Z]*\\)\\]" nil t)
+          (add-to-list 'res (match-string-no-properties 1)))
+        res)))
+
 (defun cmdlist-newthm-update-latex-buffer (&optional file)
   "Add to current buffer all ``\\newtheorem's defined in FILE (using `stick-thm-at-top') which are present in the current file and not already defined. By default FILE is `cmdlist-theorem-file'."
   ;; This is adapted from `cmdlist-update-latex-buffer'. Perhaps something should be factored out?
   (interactive)
   (unless file (setq file cmdlist-theorem-file))
   (let* ((thmlist (scan-file-for-newthms file))
-         (envs (scan-for-latex-envs))
+         (envs (append (scan-for-latex-envs) (get-newtheorem-dependencies)))
          (exceptions (mapcar 'newcmd-name (scan-for-newthms)))
          (newthms
           (dofilter (thm thmlist)
