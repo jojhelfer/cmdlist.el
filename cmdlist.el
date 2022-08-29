@@ -935,8 +935,22 @@ The name and letter are queried for, and by default are both the latex macro und
 (defun cmdlist-local-cmds-filename ()
   (concat "/tmp/" (replace-regexp-in-string "/" ":" (buffer-file-name)) ".tmp.commands"))
 
+(defun cmdlist-test-command-in-minimal-file (&optional name)
+  "Create and visit the file `/tmp/minimal.tex', and populate it with a minimal LaTeX file including the command which is prompted for (and defaults to the LaTeX command under point), so that you can test whether it is a built in command (or try to figure out what packages/documen classes provide it."
+  (interactive)
+  (unless name
+    (setq name (read-from-minibuffer "Command? " (cmdlist-latex-cmd-under-point))))
+  (find-file "/tmp/minimal.tex")
+  (delete-region (point-min) (point-max))
+  (insert
+   "\\documentclass{minimal}\n"
+   "\n"
+   "\\begin{document}\n"
+   "  \\" name "\n"
+   "\\end{document}\n"))
+
 (defun cmdlist-act-on-orphaned-command (c-or-e &optional prompt heading package-file builtin-file allow-edit-here)
-  "Give the option of assign the given command or environment name to a package, or to add it to the list of builtin commands. Return a newline-terminated message saying what happened. If ALLOW-EDIT-HERE is non-nil, offer option to edit buffer at current position, and `throw' the symbol `edit-here' with the current point."
+  "Give the option of assign the given command or environment name to a package, or to add it to the list of builtin commands. Return a newline-terminated message saying what happened. If ALLOW-EDIT-HERE is non-nil, offer option to edit buffer at current position or to run `cmdlist-test-command-in-minimal-file'. In either case, `throw' the symbol `edit-here' with a cons pair, in which the second element is the current point, and the first element is the symbol `edit' or `c-or-e', respectively."
   (unless prompt (setq prompt ""))
   (unless heading (setq heading cmdlist-package-heading))
   (unless package-file (setq package-file cmdlist-package-file))
@@ -953,11 +967,14 @@ The name and letter are queried for, and by default are both the latex macro und
                             "(D) assign a documentclass to it\n"
                             "(b) add it as a builtin\n"
                             "(f) mark it temporarily as a file-local command\n"
+                            (when allow-edit-here "(t) test it in a minimal LaTeX file\n")
                             (when allow-edit-here "(e) edit the buffer here\n")
                             "(↵) do nothing"))))
     (cond
      ((and allow-edit-here (eq decision ?e))
-      (throw 'edit-here (point)))
+      (throw 'edit-here (cons 'edit (point))))
+     ((and allow-edit-here (eq decision ?t))
+      (throw 'edit-here (cons c-or-e (point))))
      ((eq decision ?p)
       (cmdlist-choose-and-add-package-or-class c-or-e package-file nil))
     ((eq decision ?D)
@@ -1083,7 +1100,9 @@ The name and letter are queried for, and by default are both the latex macro und
         (push-mark)
         (when (member 'evil features)
           (evil-set-jump))
-        (goto-char edit-point)))))
+        (goto-char (cdr edit-point))
+        (unless (eq (car edit-point) 'edit)
+          (cmdlist-test-command-in-minimal-file (car edit-point)))))))
 
 (defun cmdlist-package-handle-command (&optional c-or-e heading package-file builtin-file)
   "Like `cmdlist-package-update-latex-buffer', but only do it for given command. If C-OR-E is nil, prompt for command, defaulting to command at point."
