@@ -4,7 +4,7 @@
 
 ;; Author: Joseph Helfer
 ;; URL: https://github.com/jojhelfer/cmdlist.el
-;; Version: 1.1.0
+;; Version: 1.1.1
 ;; Package-Requires: ((emacs "25.1"))
 
 ;; This file is NOT part of GNU Emacs.
@@ -314,13 +314,13 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
               (push cmd cmds)))))
     (reverse (delete-dups cmds)))))
 
-(defun cmdlist-newcmd-name (cmd)
-  "Return the name of the given `\\\(re\)newcommmand' or `\\newtheorem'."
+(defun cmdlist-newcmd-name (cmd &optional regex)
+  "Return the name of the given `\\\(re\)newcommmand' (or given REGEX, e.g., `\\newtheorem')."
   (cmdlist-save-everything
     (with-temp-buffer
       (insert cmd)
       (goto-char (point-min))
-      (re-search-forward "\\\\r?e?newcommand\\|\\\\newtheorem")
+      (re-search-forward (or regex "\\\\r?e?newcommand"))
       (car (split-string (cmdlist-shloop-latex-arg) nil nil "[{}]*\\\\?")))))
 
 (defun cmdlist-scan-for-newcmds ()
@@ -752,7 +752,7 @@ The name and letter are queried for, and by default are both the latex macro und
     (cmdlist-save-everything
       (goto-char (point-min))
       (while (re-search-forward "\\\\newtheorem[^a-z]" nil t)
-        (push (cmdlist-surrounding-newcmd "\\\\newtheorem") res)
+        (push (cmdlist-surrounding-newcmd "\\\\newtheorem\\*?") res)
         (cmdlist-forward-brexp)))
     (reverse res)))
 
@@ -762,7 +762,7 @@ The name and letter are queried for, and by default are both the latex macro und
   (let* ((envs (append (cmdlist-scan-for-latex-envs) (cmdlist-get-newtheorem-dependencies)))
          (newthms (cmdlist-scan-for-newthms))
          (unuseds (cmdlist-dofilter (x newthms)
-                    (not (member (cmdlist-newcmd-name x) envs)))))
+                    (not (member (cmdlist-newcmd-name x "\\newtheorem\\*?") envs)))))
     unuseds))
 
 (defun cmdlist-scan-file-for-newthms (file)
@@ -789,11 +789,11 @@ The name and letter are queried for, and by default are both the latex macro und
   (unless file (setq file cmdlist-theorem-file))
   (let* ((thmlist (cmdlist-scan-file-for-newthms file))
          (envs (append (cmdlist-scan-for-latex-envs) (cmdlist-get-newtheorem-dependencies)))
-         (exceptions (mapcar 'cmdlist-newcmd-name (cmdlist-scan-for-newthms)))
+         (exceptions (mapcar #'(lambda (x) (cmdlist-newcmd-name x "\\newtheorem\\*?")) (cmdlist-scan-for-newthms)))
          (newthms
           (cmdlist-dofilter (thm thmlist)
-            (and (member (cmdlist-newcmd-name thm) envs)
-                 (not (member (cmdlist-newcmd-name thm) exceptions))))))
+            (and (member (cmdlist-newcmd-name thm "\\newtheorem\\*?") envs)
+                 (not (member (cmdlist-newcmd-name thm "\\newtheorem\\*?") exceptions))))))
     (if newthms
         (progn
           (dolist (thm newthms)
@@ -1064,7 +1064,7 @@ The name and letter are queried for, and by default are both the latex macro und
   (append (cmdlist-read-lines builtin-file)
           ;; TODO: This is wasteful. These should be combined into a single command.
           (mapcar 'cmdlist-newcmd-name (cmdlist-scan-for-newcmds))
-          (mapcar 'cmdlist-newcmd-name (cmdlist-scan-for-newthms))
+          (mapcar #'(lambda (x) (cmdlist-newcmd-name x "\\newtheorem\\*?")) (cmdlist-scan-for-newthms))
           (cmdlist-scan-for-other-defined-cmds)
           (cmdlist-scan-for-defined-envs)
           (when (file-exists-p package-file)
