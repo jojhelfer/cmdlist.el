@@ -1,0 +1,10 @@
+\newtheorem{defn}{Definition}%definition
+\newtheorem{rmk}{Remark}%remark
+\newtheorem{thm}{Theorem}
+\newtheorem{propn}{Proposition}
+\newtheorem{claim}{Claim}
+\newtheorem{prob}{Problem}
+\newtheorem{lem}{Lemma}
+\newtheorem{cor}{Corollary}
+\newtheorem{exm}{Example}
+\newtheorem{notation}{Notation}%definition

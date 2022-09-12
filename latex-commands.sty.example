@@ -1,0 +1,36 @@
+\newcommand\abs[1]{\lvert{}#1\rvert{}}
+\newcommand\C{\mathbb{C}} % complex numbers
+\newcommand\C{\mathbf{C}}
+\newcommand\ddv[1]{\frac{\dv}{\dv{#1}}}
+\newcommand\ddvz[2][0]{\rstr{\ddv{#2}}{#2=#1}}
+\newcommand\dv{\mathrm{d}} % derivative
+\newcommand\dv{d} % ordinary letter
+\newcommand\dw{\dv{w}}
+\newcommand\dx{\dv{x}}
+\newcommand\dy{\dv{y}}
+\newcommand\dz{\dv{z}}
+\newcommand\I{^{-1}}
+\newcommand\pb{\ar[rd, phantom, "\lrcorner", pos=0]}
+\renewcommand\phi{\varphi}
+\newcommand\Q{\mathbb{Q}}
+\renewcommand\Re{\operatorname{Re}}
+\newcommand\set[1]{\{#1\}}
+\newcommand\Set{\mathbf{Set}}
+\newcommand\SL{\mathrm{SL}}
+\newcommand\SO{\mathrm{SO}}
+\newcommand\toh{\hookleftarrow}
+\newcommand\toix[1]{\xrightarrow[\raisebox{5pt}{$^\sim$}]{#1}}
+\newcommand\toix[1]{\xrightarrow[^\sim]{#1}}
+\newcommand\toi{\xrightarrow{_\sim}}
+\newcommand\too{\longrightarrow}
+\newcommand\tox[2][]{\xrightarrow[#1]{#2}}
+\newcommand\To{\Rightarrow}
+\newcommand\tto{\rightarrowtail}
+\newcommand\U{\mathcal{U}}
+\newcommand\U{\mathrm{U}}
+\newcommand\wh[1]{\widehat{#1}}
+\newcommand\wt[1]{\widetilde{#1}}
+\newcommand\xiot[1]{\xleftarrow[\raisebox{5pt}{$^\sim$}]{#1}}
+\newcommand\xot[2][]{\xleftarrow[#1]{#2}}
+\newcommand\xoth[2][]{\xhookleftarrow[#1]{#2}}
+\newcommand\Z{\mathbb{Z}}

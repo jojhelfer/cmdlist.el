@@ -4,7 +4,7 @@
 
 ;; Author: Joseph Helfer
 ;; URL: https://github.com/jojhelfer/cmdlist.el
-;; Version: 1.1.1
+;; Version: 1.2.0
 ;; Package-Requires: ((emacs "25.1"))
 
 ;; This file is NOT part of GNU Emacs.
@@ -28,18 +28,24 @@
 ;; you like to use. This package then provides tools to maintain that
 ;; file and automatically update your latex files based on it.
 
-;; There are several convenience functions, most of which are listed in
-;; the example keybindings below. The most import one is
-;; cmdlist-update-latex-buffer. See the documentation of those
-;; functions for more info, as well as the customizatoin variables
-;; below under "Variables".
+;; There is now also functionality which automatically adds
+;; "usepackage" statements based on a global file listing which
+;; packages provide which commands.
 
-;; Also see README.md for more information.
+;; There are several convenience functions, most of which are listed
+;; in the example keybindings below. The most import one is
+;; cmdlist-conditional-update-latex-buffer. See the documentation of
+;; those functions for more info, as well as the customization
+;; variables below under "Variables".
 
-;; My keybdindings:
+;; Also see README.md (presently available at
+;; https://github.com/jojhelfer/cmdlist.el) for more information.
+
+;; My keybindings:
 
 ;; (evil-define-key 'normal LaTeX-mode-map
-;;   (kbd "SPC g u") 'cmdlist-update-latex-buffer
+;;   (kbd "SPC d c") 'cmdlist-update-save-and-compile
+;;   (kbd "SPC g u") 'cmdlist-conditional-update-buffer
 ;;   (kbd "SPC g c") 'cmdlist-generate-and-add-cmd
 ;;   (kbd "SPC g a") 'cmdlist-add-cmd-to-file
 ;;   (kbd "SPC g r") 'cmdlist-generate-mathrm
@@ -53,26 +59,21 @@
 ;;   (kbd "SPC g f") 'cmdlist-open-cmdlist-file)
 
 ;; TODO Look into just parsing the whole file, hopefully with some pre-existing tool. In particular, look into AucTeX's TeX-auto-file, TeX-auto-save, etc. We should also use TeX-find-macro-start and TeX-find-macro-end (and TeX-current-macro, etc.)
-;; TODO Adapt cmdlist-sort-newcmds for \\usepackage (or maybe not since we are not sorting packages now)
-;; TODO Update documentation for theorem and package handling
-;; TODO Include compile-update-and-save helper functions
-;; TODO Add commands to clean unused theorems and packages
+;; TODO Add commands to clean unused packages
 ;; TODO Try to guess command provider by looking through package/class files
-;; TODO Allow annotating usepackage with provided commands (and adding to these automatically?)
-;; TODO Create temporary latex file for testing commands to see where they come from
 ;; TODO Ignore commands used in comments
-;; TODO Be careful about commands which are the empty string
-;; TODO When jumping to the instance of a command during querying, it should be case-sensitive.
+;; TODO Be careful about commands (and packages) which are the empty string
+;; TODO Check whether ".latex-commands.sty" and so on exist before using them
 
-;; We use some cl stuff
 (require 'cl-lib)
+(require 'seq)
 
 ;;;;;;;;;;;;;;;
 ;; Variables ;;
 ;;;;;;;;;;;;;;;
 
 (defvar cmdlist-files '("~/.latex-commands.sty")
-  "List of files containing `\\\(re\)newcommand' entires to be used by `cmdlist.el'. The first entry is also used to store new commands.")
+  "List of files containing `\\\(re\)newcommand' entries to be used by `cmdlist.el'. The first entry is also used to store new commands.")
 
 (defvar cmdlist-heading "% Commands"
   "Heading under which commands are inserted into the current buffer.")
@@ -81,7 +82,7 @@
   "If non-nil, visit cmdlist file after adding new command, unless value is `ask', in which case ask first.")
 
 (defvar cmdlist-also-add-to-buffer nil
-  "If non-nil, also add command to buffer when adding to cmdlist, unless value is `ask', in which case ask first.")
+  "If non-nil, also add command to buffer when adding to global command list, unless value is `ask', in which case ask first.")
 
 (defvar cmdlist-add-to-file-default nil
   "If non-nil, add new commands to cmdlist file by default (i.e., without prefix argument) rather than to current buffer.")
@@ -90,7 +91,10 @@
   "If non-nil, put braces around the command name (as in `\newcommand{\foo}' when adding new commands.")
 
 (defvar cmdlist-theorem-file "~/.latex-theorems.sty"
-  "Files containing `\\newtheorem' entires to be used by `cmdlist'.")
+  "File containing `\\newtheorem' entries to be used by `cmdlist'.")
+
+(defvar cmdlist-theorem-heading "% Theorems"
+  "Heading which `cmdlist-conditional-update-buffer' looks for in deciding whether to update theorems.")
 
 (defvar cmdlist-default-shared-counter "defn"
   "Default shared counter for `newtheorem's.")
@@ -108,7 +112,7 @@
   "File containing a list of built-in latex commands and environments, one per line.")
 
 (defvar cmdlist-cmd-defining-cmds
-  (list "let" "def"
+  (list "let" "def" "newtheorem*" "foreach"
         (list "newif"
               (lambda (cmd)
                 ;; Remove starting backslash if its there
@@ -124,6 +128,9 @@
 
 (defvar cmdlist-newcommands-to-ignore ()
   "List of commands that should not be taken from `cmdlist-files' by `cmdlist-update-latex-buffer'. This can be used, for example, to prevent a \"renewcommand\" of a builtin command from getting inserted.")
+
+(defvar cmdlist-test-minimal-file "/tmp/minimal.tex"
+  "Path of file created by `cmdlist-test-command-in-minimal-file' (which is called during `cmdlist-package-update-latex-buffer' when you come across an unrecognized command and select \"test it in a minimal LaTeX file\").")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; General utility functions ;;
@@ -408,7 +415,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
           (if (> (length cmds) 1)
               (let ((prompt ""))
                 (setq prompt (cmdlist-list-of-things cmds))
-                (setq prompt (concat prompt "\nMultiple entires for " name ". Choose from above: "))
+                (setq prompt (concat prompt "\nMultiple entries for " name ". Choose from above: "))
                 (setq cmd (nth
                            (- (cmdlist-prompt-for-number prompt 1 (length cmds)) 1)
                            cmds)))
@@ -634,9 +641,9 @@ The name and letter are queried for, and by default are both the latex macro und
 (defun cmdlist-show-unused-newcmds ()
   "Display `\\newcommand's in this buffer which are (apparently) not being used."
   (interactive)
-  (let ((unuseds (cmdlist-get-unused-newcmds)))
+  (let ((unuseds (append (cmdlist-get-unused-newcmds) (cmdlist-get-unused-newthms))))
     (if unuseds
-        (message "Seemingly unused commands:\n%s" (cmdlist-list-of-things unuseds))
+        (message "Seemingly unused commands:\n\n%s" (mapconcat #'identity unuseds "\n"))
       (message "No unused commands found"))))
 
 (defun cmdlist-delete-unused-newcmds ()
@@ -675,7 +682,7 @@ The name and letter are queried for, and by default are both the latex macro und
             (goto-char cmd-pos)))))))
 
 (defun cmdlist-conditional-update-buffer ()
-  "If `cmdlist-heading' is present in the buffer, run `cmdlist-update-latex-buffer'. If furthermore either of \"% Theorems\" or `cmdlist-package-heading' is present, run `cmdlist-newthm-update-latex-buffer' or `cmdlist-package-update-latex-buffer', respectively."
+  "If `cmdlist-heading' is present in the buffer, run `cmdlist-update-latex-buffer'. If furthermore either of `cmdlist-theorem-heading' or `cmdlist-package-heading' is present, run `cmdlist-newthm-update-latex-buffer' or `cmdlist-package-update-latex-buffer', respectively."
   (interactive)
   (let ((has-heading nil)
         (has-thm-heading nil)
@@ -684,7 +691,7 @@ The name and letter are queried for, and by default are both the latex macro und
       (goto-char (point-min))
       (setq has-heading (re-search-forward (concat "^" cmdlist-heading "$") nil t))
       (goto-char (point-min))
-      (setq has-thm-heading (re-search-forward (concat "^" "% Theorems" "$") nil t))
+      (setq has-thm-heading (re-search-forward (concat "^" cmdlist-theorem-heading "$") nil t))
       (goto-char (point-min))
       (setq has-pkg-heading (re-search-forward (concat "^" cmdlist-package-heading "$") nil t)))
     (when has-heading
@@ -923,21 +930,22 @@ The name and letter are queried for, and by default are both the latex macro und
         choice))))
 
 (defun cmdlist-choose-and-add-package-or-class (cmd &optional package-file class pkgchoice)
-  "Prompt for a package (or if CLASS, document class) from PACKAGE-FILE and add cmd to it. Create a new package or class if necessary. Then sort the package file. Return a newline-terminated message explaining what happened. If PKGCHOICE is non-nil, use that as chosen package or document class instead of prompting."
+  "Prompt for a package (or if CLASS, document class) from PACKAGE-FILE (default `cmdlist-package-file') and add cmd to it. Create a new package or class if necessary. Then sort the package file. Return a newline-terminated message explaining what happened. If PKGCHOICE is non-nil, use that as chosen package or document class instead of prompting."
   (unless package-file (setq package-file cmdlist-package-file))
-  (let ((pkg
-         (or pkgchoice
-             (completing-read
-              (concat "Choose a " (if class "document class" "package") ": ")
-              (cmdlist-dofilter (x (cmdlist-read-lines package-file))
-                (or
-                 (and (not class) (string-prefix-p "\\usepackage" x))
-                 (and class (string-prefix-p "\\documentclass" x))))))))
+  (let* ((definer (if class "\\documentclass" "\\usepackage"))
+         (pkg-or-class-list
+          (mapcar #'(lambda (x) (cmdlist-newcmd-name x definer))
+                  (cmdlist-dofilter (x (cmdlist-read-lines package-file))
+                    (string-prefix-p definer x))))
+         (pkg
+          (or pkgchoice
+              (completing-read
+               (concat "Choose a " (if class "document class" "package") ": ")
+               pkg-or-class-list))))
     (with-temp-file package-file
       (when (file-exists-p package-file)
         (insert-file-contents package-file))
-      (if (or (string-prefix-p "\\usepackage" pkg)
-              (string-prefix-p "\\documentclass" pkg))
+      (if (member pkg pkg-or-class-list)
           ;; We are adding to an existing line.
           (progn (goto-char (point-min))
                  (search-forward pkg)
@@ -963,11 +971,11 @@ The name and letter are queried for, and by default are both the latex macro und
   (concat "/tmp/" (replace-regexp-in-string "/" ":" (buffer-file-name)) ".tmp.commands"))
 
 (defun cmdlist-test-command-in-minimal-file (&optional name)
-  "Create and visit the file `/tmp/minimal.tex', and populate it with a minimal LaTeX file including the command which is prompted for (and defaults to the LaTeX command under point), so that you can test whether it is a built in command (or try to figure out what packages/documen classes provide it."
+  "Create and visit the file `cmdlist-test-minimal-file', and populate it with a minimal LaTeX file including the command which is prompted for (and defaults to the LaTeX command under point), so that you can test whether it is a built in command (or try to figure out what packages/document classes provide it."
   (interactive)
   (unless name
     (setq name (read-from-minibuffer "Command? " (cmdlist-latex-cmd-under-point))))
-  (find-file "/tmp/minimal.tex")
+  (find-file cmdlist-test-minimal-file)
   (delete-region (point-min) (point-max))
   (insert
    "\\documentclass{minimal}\n"
