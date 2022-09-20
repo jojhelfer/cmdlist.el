@@ -128,36 +128,66 @@ Moreover, the comment may contain a further `%` sign, followed by a comma-separa
 We summarize the variables available for customization.
 
 * `cmdlist-files`: see above (note that this is a list of filenames, all of which are used draw commands from; the first entry in the list is the file which new commands are added to)
-Default: `~/.latex-commands.sty`
+
+  Default: `"~/.latex-commands.sty"`
+
 * `cmdlist-theorem-file`: see above
-Default: `~/.latex-theorems.sty`
+
+  Default: `"~/.latex-theorems.sty"`
+
 * `cmdlist-package-file`: see above
-Default: `~/.latex-packages.sty`
+
+  Default: `"~/.latex-packages.sty"`
+
 * `cmdlist-builtin-file`: see above
-Default: `~/.latex-builtins`
+
+  Default: `"~/.latex-builtins"`
+
 * `cmdlist-heading`: see above
-Default: `% Commands`
+
+  Default: `"% Commands"`
+
 * `cmdlist-package-heading` : see above
-Default: `% Packages`
+
+  Default: `"% Packages"`
+
 * `cmdlist-theorem-heading`: the heading which `cmdlist-conditional-update-buffer` looks for in deciding whether to update theorems.
-Default: `% Theorems`
+
+  Default: `"% Theorems"`
+
 * `cmdlist-visit-after-adding`: whether to visit the global command file after adding a new command to it.
-Default: `nil`.
+
+  Default: `nil`.
+
 * `cmdlist-also-add-to-buffer`: If non-nil, also add command to buffer when adding to global command list, unless value is `'ask`, in which case ask first.
-Default: `nil`
+
+  Default: `nil`
+
 * `cmdlist-add-to-file-default`: see above
-Default: `nil`
+
+  Default: `nil`
+
 * `cmdlist-braces-around-cmd-name`: whether to include braces around the names of newly generated commands (as in `\newcommand{\foo}`)
-Default: `nil`
+
+  Default: `nil`
+
 * `cmdlist-default-shared-counter`: see above
-Default: `"defn"`
+
+  Default: `"defn"`
+
 * `cmdlist-default-parent-counter` see above
-Default: nil
+
+  Default: nil
+
 * `cmdlist-ignore-at-symbol`: If non-nil, `cmdlist-package-update-latex-buffer` will ignore commands containing `@`. (Note that, in any case, `@` is always treated as part of a command name, which will be incorrect if not within `\makeatletter` region.)
-Default: `t`
+
+  Default: `t`
+
 * `cmdlist-newcommands-to-ignores`: List of commands that should not be taken from `cmdlist-files` by `cmdlist-update-latex-buffer`. This can be used, for example, to prevent a \"renewcommand\" of a builtin command from getting inserted.
 * `cmdlist-test-minimal-file`: Path of file created by `cmdlist-test-command-in-minimal-file` (which is called during `cmdlist-package-update-latex-buffer` when you come across an unrecognized command and select \"test it in a minimal LaTeX file\").
-Default: `"/tmp/minimal.tex"`
+
+  Default: `"/tmp/minimal.tex"`
+
 
 ## Example keybindings
 
