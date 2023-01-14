@@ -28,10 +28,10 @@
 \usepackage{subcaption}%subfigure
 \usepackage{subfig}%subfloat
 \usepackage{systeme}%systeme
-\usepackage{tikz-cd}%ar,arrow,color,draw,fill,foreach,node,textcolor,tikzcd,tikzpicture,usetikzlibrary%tikz
-\usepackage{tikz}%path%xcolor
+\usepackage{tikz-cd}%ar,arrow,tikzcd%tikz
+\usepackage{tikz}%draw,fill,foreach,node,path,textcolor,tikzpicture,usetikzlibrary%xcolor
 \usepackage{titlesec}%titleformat,titlespacing
 \usepackage{tocloft}%cftsecnumwidth,cftsubsecnumwidth,counterwithout
 \usepackage{todonotes}%todo
-\usepackage{xcolor}%definecolor,rowcolor,rowcolors
+\usepackage{xcolor}%color,definecolor,rowcolor,rowcolors
 \usepackage{xstring}%IfEndWith

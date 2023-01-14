@@ -4,7 +4,7 @@
 
 ;; Author: Joseph Helfer
 ;; URL: https://github.com/jojhelfer/cmdlist.el
-;; Version: 1.2.0
+;; Version: 1.2.1
 ;; Package-Requires: ((emacs "25.1"))
 
 ;; This file is NOT part of GNU Emacs.
@@ -948,7 +948,7 @@ The name and letter are queried for, and by default are both the latex macro und
       (if (member pkg pkg-or-class-list)
           ;; We are adding to an existing line.
           (progn (goto-char (point-min))
-                 (search-forward pkg)
+                 (search-forward (concat "{" pkg "}"))
                  (beginning-of-line)
                  (re-search-forward "%\\([^%]*\\)\\(%\\|$\\)" (line-end-position))
                  (replace-match
