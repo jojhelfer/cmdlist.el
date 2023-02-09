@@ -4,7 +4,7 @@
 
 ;; Author: Joseph Helfer
 ;; URL: https://github.com/jojhelfer/cmdlist.el
-;; Version: 1.2.1
+;; Version: 1.2.2
 ;; Package-Requires: ((emacs "25.1"))
 
 ;; This file is NOT part of GNU Emacs.
@@ -425,17 +425,36 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
             (push cmd choices)))))
     choices))
 
+;; We no longer use this as it has been replaced by `cmdlist-replace-prompt', but we are keeping it around for now anyway.
 (defun cmdlist-already-p (cmdlist entry)
-  "If the command defined in ENTRY is in cmdlist, display all matches and ask the user to proceed."
+  "If the command defined in ENTRY is in CMDLIST, display all matches and ask the user to proceed."
   (let* ((name (cmdlist-newcmd-name entry))
-         (matches (cmdlist-get-cmdlist-matches cmdlist name))
-         (nmatches (length matches)))
+         (matches (cmdlist-get-cmdlist-matches cmdlist name)))
     (if (not matches) t
       (let ((prompt))
         (setq prompt (cmdlist-list-of-things matches))
         (setq prompt (concat prompt
                              (concat "\n" name " already defined. Continue anyway? ")))
         (y-or-n-p prompt)))))
+
+(defun cmdlist-replace-prompt (cmdlist entry)
+  "If the command defined in ENTRY is not in CMDLIST, return `t'. Otherwise, display all matches and ask the user to proceed. The user may select an entry to replace, which is then returned, cancel, in which case `nil' is return, or choose to add a new entry, in which `t' is returned."
+  (let* ((name (cmdlist-newcmd-name entry))
+         (matches (cmdlist-get-cmdlist-matches cmdlist name))
+         (many (< 1(length matches))))
+    (if (not matches) t
+      (case (car (read-multiple-choice
+                  (concat "\"" name "\" already defined. Previous definition"
+                          (when many "s")
+                          ":\n"
+                          (cmdlist-list-of-things matches "  ")
+                          "\n\nWhat would you like to do?")
+                  `((?q "quit")
+                    (?r ,(concat "replace " (when many "an ") "existing definition"))
+                    (?a "add a new definition"))))
+        (?q nil)
+        (?a t)
+        (?r (cmdlist-singleton-or-prompt matches "Which definition to replace? "))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Modifying buffer and adding new commands ;;
@@ -472,26 +491,31 @@ If the command being defined in NEWCMD is already in FILE, ask for confirmation.
   (unless file (setq file (car cmdlist-files)))
   (if (and (file-readable-p file) (file-writable-p file))
       (let ((cmdlist (cmdlist-scan-file-for-newcmds file)))
-        (if (cmdlist-already-p cmdlist newcmd)
-            (cmdlist-save-everything
-              (let ((fibuf (find-file-noselect file)))
-                (with-current-buffer fibuf
-                  (goto-char (point-min))
-                  (insert newcmd)
-                  (insert "\n")
-                  (cmdlist-sort-newcmds nil (point-min) (point-max))
-                  (save-buffer))
-                (if (not cmdlist-visit-after-adding)
-                    (kill-buffer fibuf)
-                  (unless (and (eq cmdlist-visit-after-adding 'ask)
-                               (not (y-or-n-p
-                                     (format "New entry\n  %s\nadded to file %s\nVisit? "
-                                             newcmd file))))
-                    (switch-to-buffer-other-window fibuf)
-                    (search-forward newcmd)
-                    (beginning-of-line))))
-              (message "New entry\n  %s\nadded to file %s" newcmd file))
-          (message "Operation cancelled.")))
+        (let ((action (cmdlist-replace-prompt cmdlist newcmd)))
+          (if action
+              (cmdlist-save-everything
+                (let ((fibuf (find-file-noselect file)))
+                  (with-current-buffer fibuf
+                    (unless (eq t action)
+                      (goto-char (point-min))
+                      (search-forward (concat action "\n"))
+                      (delete-region (match-beginning 0) (match-end 0)))
+                    (goto-char (point-min))
+                    (insert newcmd)
+                    (insert "\n")
+                    (cmdlist-sort-newcmds nil (point-min) (point-max))
+                    (save-buffer))
+                  (if (not cmdlist-visit-after-adding)
+                      (kill-buffer fibuf)
+                    (unless (and (eq cmdlist-visit-after-adding 'ask)
+                                 (not (y-or-n-p
+                                       (format "New entry\n  %s\nadded to file %s\nVisit? "
+                                               newcmd file))))
+                      (switch-to-buffer-other-window fibuf)
+                      (search-forward newcmd)
+                      (beginning-of-line))))
+                (message "New entry\n  %s\nadded to file %s" newcmd file))
+            (message "Operation cancelled."))))
     (message "File %s does not exist or not readable/writable." file)))
 
 (defun cmdlist-add-newcmd (newcmd &optional heading file)
@@ -503,11 +527,16 @@ If FILE is given, instead add it to FILE. If FILE is `t', it is set to the first
         (unless (stringp file) (setq file (car cmdlist-files)))
         (cmdlist-add-to-cmdlist-file newcmd file))
     (unless heading (setq heading cmdlist-heading))
-    (if (cmdlist-already-p (cmdlist-scan-for-newcmds) newcmd)
-        (progn
-          (cmdlist-stick-at-top heading newcmd 'cmdlist-sort-newcmds)
-          (message "New entry\n  %s\nadded under %s ." newcmd heading))
-      (message "Operation cancelled"))))
+    (let ((action (cmdlist-replace-prompt (cmdlist-scan-for-newcmds) newcmd)))
+      (if (not action)
+          (message "Operation cancelled")
+        (unless (eq t action)
+          (cmdlist-save-everything
+            (goto-char (point-min))
+            (search-forward (concat action "\n"))
+            (delete-region (match-beginning 0) (match-end 0))))
+        (cmdlist-stick-at-top heading newcmd 'cmdlist-sort-newcmds)
+        (message "New entry\n  %s\nadded under %s ." newcmd heading)))))
 
 (defun cmdlist-generate-newcmd ()
   "Generate a `\\newcommand' and return it. The name and definition of the new macro are queried for.
@@ -991,6 +1020,7 @@ The name and letter are queried for, and by default are both the latex macro und
   (unless package-file (setq package-file cmdlist-package-file))
   (unless builtin-file (setq builtin-file cmdlist-builtin-file))
   ;; Prompt to add new builtin or add to a package
+  ;; TODO: this should perhaps use read-multiple-choice; alternatively, cmdlist-replace-prompt should use something more like this
   (let ((decision
          (read-char (concat (propertize prompt 'face 'shadow)
                             (when (> (length prompt) 0)
