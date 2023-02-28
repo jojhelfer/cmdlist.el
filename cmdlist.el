@@ -64,6 +64,7 @@
 ;; TODO Ignore commands used in comments
 ;; TODO Be careful about commands (and packages) which are the empty string
 ;; TODO Check whether ".latex-commands.sty" and so on exist before using them
+;; TODO Add \usetikzlibrary support
 
 (require 'cl-lib)
 (require 'seq)
@@ -269,7 +270,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 
 (defun cmdlist-surrounding-newcmd (&optional regex)
   "If point is not inside of a latex `\\\(re\)newcommand' (or given REGEX, e.g., `\\newtheorem'), return nil. Otherwise, return the text of the whole command."
-  (unless regex (setq regex "\\\\r?e?newcommand"))
+  (unless regex (setq regex "\\\\\\(new\\|renew\\|provide\\)command"))
   (let ((start (point))
         (beg))
     (cmdlist-save-everything
@@ -327,7 +328,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
     (with-temp-buffer
       (insert cmd)
       (goto-char (point-min))
-      (re-search-forward (or regex "\\\\r?e?newcommand"))
+      (re-search-forward (or regex "\\\\\\(new\\|renew\\|provide\\)command"))
       (car (split-string (cmdlist-shloop-latex-arg) nil nil "[{}]*\\\\?")))))
 
 (defun cmdlist-scan-for-newcmds ()
@@ -335,7 +336,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
   (let ((res))
     (cmdlist-save-everything
       (goto-char (point-min))
-      (while (re-search-forward "\\\\r?e?newcommand" nil t)
+      (while (re-search-forward "\\\\\\(new\\|renew\\|provide\\)command" nil t)
         (push (cmdlist-surrounding-newcmd) res)
         (cmdlist-forward-brexp)))
     (reverse res)))
@@ -932,7 +933,7 @@ The name and letter are queried for, and by default are both the latex macro und
   (let ((res))
     (cmdlist-save-everything
       (goto-char (point-min))
-      (while (re-search-forward "\\\\usepackage" nil t)
+      (while (re-search-forward "\\\\\\(usepackage\\|RequirePackage\\)" nil t)
         (while (not (eq (char-after) ?{)) (forward-sexp))
         (push (car (split-string (cmdlist-shloop-latex-arg) nil nil "[{}]")) res)))
     (reverse res)))
