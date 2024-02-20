@@ -65,6 +65,7 @@
 ;; TODO Be careful about commands (and packages) which are the empty string
 ;; TODO Check whether ".latex-commands.sty" and so on exist before using them
 ;; TODO Add \usetikzlibrary support
+;; TODO Add option to (via elisp) allow presence of certain commands to trigger insertion of arbitrary code in preamble
 
 (require 'cl-lib)
 (require 'seq)
@@ -361,7 +362,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
    "{" defn "}"))
 
 (defun cmdlist-num-args-in-defn (defn)
-  "Return the greatest argument number in the latex command definition DEFN. Only work for definitions with at most 9 arguments."
+  "Return the greatest argument number in the latex command definition DEFN. Only works for definitions with at most 9 arguments."
   (let ((maxnum 0))
     (cmdlist-save-everything
       (with-temp-buffer
@@ -572,7 +573,7 @@ By default HEADING is `cmdlist-heading' and FILES are the files in the variable 
   (unless prefix (setq prefix ""))
   (let* ((cmdlist (apply 'append (mapcar 'cmdlist-scan-file-for-newcmds files)))
          (cmds (cmdlist-scan-for-latex-cmds))
-         (exceptions (append (mapcar 'cmdlist-newcmd-name (cmdlist-scan-for-newcmds)) cmdlist-newcommands-to-ignore))
+         (exceptions (append (mapcar 'cmdlist-newcmd-name (cmdlist-scan-for-newcmds)) (cmdlist-scan-for-other-defined-cmds) cmdlist-newcommands-to-ignore))
          (newcmds (cmdlist-select-cmds-from-cmdlist cmdlist cmds exceptions)))
     (if newcmds
         (progn
@@ -1032,7 +1033,7 @@ The name and letter are queried for, and by default are both the latex macro und
                             "(d) assign to current documentclass\n"
                             "(D) assign a documentclass to it\n"
                             "(b) add it as a builtin\n"
-                            "(f) ignore it in this file for the rest of this session\n"
+                            "(i) ignore it in this file for the rest of this session\n"
                             (when allow-edit-here "(t) test it in a minimal LaTeX file\n")
                             (when allow-edit-here "(e) edit the buffer here\n")
                             "(↵) do nothing"))))
@@ -1043,31 +1044,31 @@ The name and letter are queried for, and by default are both the latex macro und
       (throw 'edit-here (cons c-or-e (point))))
      ((eq decision ?p)
       (cmdlist-choose-and-add-package-or-class c-or-e package-file nil))
-    ((eq decision ?D)
-     (cmdlist-choose-and-add-package-or-class c-or-e package-file t))
-    ((eq decision ?d)
-     (cmdlist-choose-and-add-package-or-class c-or-e package-file t
-                                      (car (cmdlist-get-document-class))))
-    ((eq decision ?f)
-     (let ((fname (cmdlist-local-cmds-filename)))
-       (with-temp-file fname
-         (when (file-exists-p fname)
-               (insert-file fname))
-        ;; In case the file is not newline-terminated as it should be
-        (unless (or (eq (point) (point-min)) (eq (char-before) ?\n)) (insert "\n"))
-        (insert c-or-e "\n")))
-     (concat "`" c-or-e "' marked temporarily as a file-local command\n"))
-    ((eq decision ?b)
-     (with-temp-file builtin-file
-       (when (file-exists-p builtin-file)
-         (insert-file-contents builtin-file))
-       (goto-char (point-max))
-        ;; In case the file is not newline-terminated as it should be
-        (unless (or (eq (point) (point-min)) (eq (char-before) ?\n)) (insert "\n"))
-       (insert c-or-e "\n")
-       (let ((sort-fold-case t))
-         (sort-lines nil (point-min) (point-max))))
-     (concat "`" c-or-e "' added as builtin\n")))))
+     ((eq decision ?D)
+      (cmdlist-choose-and-add-package-or-class c-or-e package-file t))
+     ((eq decision ?d)
+      (cmdlist-choose-and-add-package-or-class c-or-e package-file t
+                                               (car (cmdlist-get-document-class))))
+     ((eq decision ?i)
+          (let ((fname (cmdlist-local-cmds-filename)))
+            (with-temp-file fname
+              (when (file-exists-p fname)
+                (insert-file fname))
+              ;; In case the file is not newline-terminated as it should be
+              (unless (or (eq (point) (point-min)) (eq (char-before) ?\n)) (insert "\n"))
+              (insert c-or-e "\n")))
+          (concat "`" c-or-e "' marked temporarily as a file-local command\n"))
+      ((eq decision ?b)
+       (with-temp-file builtin-file
+         (when (file-exists-p builtin-file)
+           (insert-file-contents builtin-file))
+         (goto-char (point-max))
+         ;; In case the file is not newline-terminated as it should be
+         (unless (or (eq (point) (point-min)) (eq (char-before) ?\n)) (insert "\n"))
+         (insert c-or-e "\n")
+         (let ((sort-fold-case t))
+           (sort-lines nil (point-min) (point-max))))
+       (concat "`" c-or-e "' added as builtin\n")))))
 
 (defun cmdlist-scan-for-other-defined-cmds ()
   "Return a list of all commands defined in the current buffer using commands in `cmdlist-cmd-defining-cmds'."
