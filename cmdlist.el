@@ -686,7 +686,8 @@ The name and letter are queried for, and by default are both the latex macro und
           (dolist (x unuseds)
             (cmdlist-save-everything
               (goto-char (point-min))
-              (search-forward x)
+              (let ((case-fold-search nil))
+                (search-forward x))
               ; instead of kill-line, to avoid changing kill-ring
               (delete-region (progn (beginning-of-line) (point))
                              (1+ (progn (end-of-line) (point)))))))
