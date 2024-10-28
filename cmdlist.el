@@ -445,7 +445,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
          (matches (cmdlist-get-cmdlist-matches cmdlist name))
          (many (< 1(length matches))))
     (if (not matches) t
-      (case (car (read-multiple-choice
+      (cl-case (car (read-multiple-choice
                   (concat "\"" name "\" already defined. Previous definition"
                           (when many "s")
                           ":\n"
