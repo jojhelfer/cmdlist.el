@@ -74,13 +74,16 @@
 ;; Variables ;;
 ;;;;;;;;;;;;;;;
 
-(defvar cmdlist-files '("~/.latex-commands.sty")
+(defvar cmdlist-base-directory (file-name-concat user-emacs-directory "cmdlist")
+  "Default directory in which files with command definitions should be stored")
+
+(defvar cmdlist-files `(,(file-name-concat cmdlist-base-directory "latex-commands.sty"))
   "List of files containing `\\\(re\)newcommand' entries to be used by `cmdlist.el'. The first entry is also used to store new commands.")
 
 (defvar cmdlist-heading "% Commands"
   "Heading under which commands are inserted into the current buffer.")
 
-(defvar cmdlist-visit-after-adding 'nil
+(defvar cmdlist-visit-after-adding nil
   "If non-nil, visit cmdlist file after adding new command, unless value is `ask', in which case ask first.")
 
 (defvar cmdlist-also-add-to-buffer nil
@@ -92,7 +95,7 @@
 (defvar cmdlist-braces-around-cmd-name nil
   "If non-nil, put braces around the command name (as in `\newcommand{\foo}' when adding new commands.")
 
-(defvar cmdlist-theorem-file "~/.latex-theorems.sty"
+(defvar cmdlist-theorem-file (file-name-concat cmdlist-base-directory "latex-theorems.sty")
   "File containing `\\newtheorem' entries to be used by `cmdlist'.")
 
 (defvar cmdlist-theorem-heading "% Theorems"
@@ -104,13 +107,13 @@
 (defvar cmdlist-default-parent-counter nil
   "Default parent counter for `newtheorem's (if `cmdlist-default-shared-counter' is `nil').")
 
-(defvar cmdlist-package-file "~/.latex-packages.sty"
+(defvar cmdlist-package-file (file-name-concat cmdlist-base-directory "latex-packages.sty")
   "File each of whose lines contains a `\\usepackage' or `\\documentclass' command followed by a comment with a comma-separated list of commands and environment it provides.")
 
 (defvar cmdlist-package-heading "% Packages"
   "Heading under which packages are inserted into the current buffer.")
 
-(defvar cmdlist-builtin-file "~/.latex-builtins"
+(defvar cmdlist-builtin-file (file-name-concat cmdlist-base-directory "latex-builtins")
   "File containing a list of built-in latex commands and environments, one per line.")
 
 (defvar cmdlist-cmd-defining-cmds
