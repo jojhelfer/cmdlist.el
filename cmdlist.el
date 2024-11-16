@@ -138,7 +138,7 @@
 ;; General utility functions ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defmacro cmdlist-dofilter (varbind &rest body)
+(defmacro cmdlist--dofilter (varbind &rest body)
   "Binds VAR to each element of LIST and performs BODY, returning the list of those elements for which result of BODY is non-nil.
 
 \(fn (VAR LIST) BODY...)"
@@ -150,7 +150,7 @@
              (push ,(nth 0 varbind) ,res)))
        (reverse ,res))))
 
-(defun cmdlist-zip1 (&rest args)
+(defun cmdlist--zip1 (&rest args)
   "If ARGS are all non-empty lists, return (HEADS . TAILS), where HEADS is a list of the first elements, and TAILS is a list of the ends, otherwise return nil."
   (let ((heads) (tails)
         (good t))
@@ -162,24 +162,24 @@
     (when good
       (cons (reverse heads) (reverse tails)))))
 
-(defun cmdlist-zip (&rest args)
+(defun cmdlist--zip (&rest args)
   (let ((res)
-        (cur (apply 'cmdlist-zip1 args)))
+        (cur (apply 'cmdlist--zip1 args)))
     (while cur
       (push (car cur) res)
-      (setq cur (apply 'cmdlist-zip1 (cdr cur))))
+      (setq cur (apply 'cmdlist--zip1 (cdr cur))))
     (reverse res)))
 
-(defun cmdlist-list-of-things (things &optional fmt)
+(defun cmdlist--list-of-things (things &optional fmt)
   "Concatenates the strings in THINGS, separated by newlines with a number at the beginning of each line.
 FMT specifies how the number should be formatted (default \"[%d]\")."
   (unless fmt
       (setq fmt "[%d] "))
   (let* ((nums (mapcar (lambda (x) (format fmt x)) (number-sequence 1 (length things))))
-         (lines (cmdlist-zip nums things)))
+         (lines (cmdlist--zip nums things)))
     (mapconcat (lambda (x) (apply 'concat x)) lines "\n")))
 
-(defun cmdlist-prompt-for-number (prompt &optional min max)
+(defun cmdlist--prompt-for-number (prompt &optional min max)
   "Keep displaying PROMPT and asking the user for input until the input is an integer (between MIN and MAX, if provided), then return it as an integer."
   (let ((response "")
         (res 0))
@@ -190,7 +190,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
       (setq res (string-to-number response)))
   res))
 
-(defun cmdlist-forward-brexp ()
+(defun cmdlist--forward-brexp ()
   "Move forward across one matching curly bracket expression."
   (interactive)
   (when (search-forward "{" nil nil)
@@ -201,7 +201,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
           (setq count (+ count
                          (if (eq (char-before) ?\{) 1 -1))))))))
 
-(defmacro cmdlist-save-everything (&rest body)
+(defmacro cmdlist--save-everything (&rest body)
   "Save mark-and-excursion, restriction, and match-data."
   (declare (indent 0) (debug t))
   `(save-mark-and-excursion
@@ -209,11 +209,18 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
        (save-match-data
          ,@body))))
 
+(defun cmdlist--read-lines (file)
+  "Read lines of file into a list and return it, or nil if file does not exist."
+  (when (file-exists-p file)
+    (with-temp-buffer
+      (insert-file-contents file)
+      (split-string (buffer-string) "\n" t))))
+
 ;;;;;;;;;;;;;;;;;;;;;;
 ;; Parsing commands ;;
 ;;;;;;;;;;;;;;;;;;;;;;
 
-(defun cmdlist-shloop-latex-arg ()
+(defun cmdlist--shloop-latex-arg ()
   "Move past the latex argument (bracket expression, command name, or single character) starting under point, and return it"
   ;; Move past any spaces and comments
   (while
@@ -221,7 +228,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
     (cond ((eq (char-after) ?%) (forward-line) t)))
   (let ((start (point)))
     (cond
-     ((eq (char-after) ?\{) (cmdlist-forward-brexp))
+     ((eq (char-after) ?\{) (cmdlist--forward-brexp))
      ((eq (char-after) ?\\)
       (forward-char)
       (re-search-forward "[^A-Za-z@]")
@@ -229,22 +236,22 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
      ((forward-char)))
     (buffer-substring-no-properties start (point))))
 
-(defun cmdlist-latex-cmd-under-point ()
+(defun cmdlist--latex-cmd-under-point ()
   "If point is on a latex command, return its name, else nil"
   (let ((start (point)))
-    (cmdlist-save-everything
+    (cmdlist--save-everything
       (when (< (point) (point-max))
         (forward-char))
       (when (search-backward "\\" nil t)
-        (let ((cmd (cmdlist-shloop-latex-arg)))
+        (let ((cmd (cmdlist--shloop-latex-arg)))
           (when (<= start (point))
             (substring cmd 1)))))))
 
-(defun cmdlist-search-backward-incl (string)
+(defun cmdlist--search-backward-incl (string)
   "Goto beginning of first instance STRING occurring before or around point. Return nil if STRING was not found."
   (let ((len (length string))
         (start))
-    (cmdlist-save-everything
+    (cmdlist--save-everything
       (forward-char)
       (search-backward (substring string 0 1) nil t)
       (when (or (and (<= (+ (point) len) (point-max))
@@ -254,11 +261,11 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
     (when start
       (goto-char start))))
 
-(defun cmdlist-re-search-backward-incl (regex)
+(defun cmdlist--re-search-backward-incl (regex)
   "Goto beginning of first instance REGEX occurring before or around point. Return nil if STRING was not found."
   (let ((start (point))
         (place))
-    (cmdlist-save-everything
+    (cmdlist--save-everything
       (if (re-search-backward regex nil t)
           (progn (setq place (match-beginning 0))
                  (forward-char))
@@ -269,34 +276,34 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
     (when place
       (goto-char place))))
 
-(defun cmdlist-surrounding-newcmd (&optional regex)
+(defun cmdlist--surrounding-newcmd (&optional regex)
   "If point is not inside of a latex `\\\(re\)newcommand' (or given REGEX, e.g., `\\newtheorem'), return nil. Otherwise, return the text of the whole command."
   (unless regex (setq regex "\\\\\\(new\\|renew\\|provide\\)command"))
   (let ((start (point))
         (beg))
-    (cmdlist-save-everything
-      (when (cmdlist-re-search-backward-incl regex)
+    (cmdlist--save-everything
+      (when (cmdlist--re-search-backward-incl regex)
         (setq beg (point))
         (search-forward-regexp regex)
         (when (eq (char-after) ?\{)
-          (cmdlist-forward-brexp))
-        (cmdlist-forward-brexp)
+          (cmdlist--forward-brexp))
+        (cmdlist--forward-brexp)
         (when (>= (point) start)
           (end-of-line)
           (buffer-substring-no-properties beg (point)))))))
 
-(defun cmdlist-scan-for-latex-cmds (&optional ignore-newcmds)
+(defun cmdlist--scan-for-latex-cmds (&optional ignore-newcmds)
   "Return all names of latex commands in current buffer."
   (let (cmds last-newcmd-pos)
-    (cmdlist-save-everything
+    (cmdlist--save-everything
       (when ignore-newcmds
         (goto-char (point-max))
         (if (not (search-backward "\\newcommand" nil t))
             (setq ignore-newcmds nil)
           (forward-char 11)
           (when (eq (char-after) ?\{)
-            (cmdlist-forward-brexp))
-          (cmdlist-forward-brexp)
+            (cmdlist--forward-brexp))
+          (cmdlist--forward-brexp)
           (setq last-newcmd-pos (point))))
       (goto-char (point-min))
       (while (search-forward "\\" nil t)
@@ -312,44 +319,44 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
                  (let ((beg (progn (while (eq (char-before) ?\\) (backward-char)) (point)))
                        (end (progn (while (eq (char-after) ?\\) (forward-char)) (point))))
                    (cl-evenp (- end beg))))
-          (let ((cmd (cmdlist-latex-cmd-under-point)))
+          (let ((cmd (cmdlist--latex-cmd-under-point)))
             (unless (or (not cmd)
                         (equal cmd "")
                         (and ignore-newcmds
                              (< (point) last-newcmd-pos)
-                             (let ((snc (cmdlist-surrounding-newcmd)))
+                             (let ((snc (cmdlist--surrounding-newcmd)))
                                (and snc
-                                    (equal cmd (cmdlist-newcmd-name snc))))))
+                                    (equal cmd (cmdlist--newcmd-name snc))))))
               (push cmd cmds)))))
     (reverse (delete-dups cmds)))))
 
-(defun cmdlist-newcmd-name (cmd &optional regex)
+(defun cmdlist--newcmd-name (cmd &optional regex)
   "Return the name of the given `\\\(re\)newcommmand' (or given REGEX, e.g., `\\newtheorem')."
-  (cmdlist-save-everything
+  (cmdlist--save-everything
     (with-temp-buffer
       (insert cmd)
       (goto-char (point-min))
       (re-search-forward (or regex "\\\\\\(new\\|renew\\|provide\\)command"))
-      (car (split-string (cmdlist-shloop-latex-arg) nil nil "[{}]*\\\\?")))))
+      (car (split-string (cmdlist--shloop-latex-arg) nil nil "[{}]*\\\\?")))))
 
-(defun cmdlist-scan-for-newcmds ()
+(defun cmdlist--scan-for-newcmds ()
   "Return a list of all \\newcommmands in the current buffer"
   (let ((res))
-    (cmdlist-save-everything
+    (cmdlist--save-everything
       (goto-char (point-min))
       (while (re-search-forward "\\\\\\(new\\|renew\\|provide\\)command" nil t)
-        (push (cmdlist-surrounding-newcmd) res)
-        (cmdlist-forward-brexp)))
+        (push (cmdlist--surrounding-newcmd) res)
+        (cmdlist--forward-brexp)))
     (reverse res)))
 
-(defun cmdlist-scan-file-for-newcmds (file)
+(defun cmdlist--scan-file-for-newcmds (file)
   "Return a list of all \\newcommmands in the given file"
   (save-mark-and-excursion
     (with-temp-buffer
       (insert-file-contents file)
-      (cmdlist-scan-for-newcmds))))
+      (cmdlist--scan-for-newcmds))))
 
-(defun cmdlist-assemble-newcmd (name defn &optional numargs opt)
+(defun cmdlist--assemble-newcmd (name defn &optional numargs opt)
   "Return the `\\newcommand' defining NAME with definition DEFN. If NUMARGS or OPT are provided, they are the number of arguments and the default optional argument, respectively."
   (concat
    "\\newcommand"
@@ -361,10 +368,10 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
    (when opt  (format "[%s]" opt))
    "{" defn "}"))
 
-(defun cmdlist-num-args-in-defn (defn)
+(defun cmdlist--num-args-in-defn (defn)
   "Return the greatest argument number in the latex command definition DEFN. Only works for definitions with at most 9 arguments."
   (let ((maxnum 0))
-    (cmdlist-save-everything
+    (cmdlist--save-everything
       (with-temp-buffer
         (insert defn)
         (goto-char (point-min))
@@ -374,10 +381,10 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
               (setq maxnum newnum))))))
     maxnum))
 
-(defun cmdlist-sort-newcmds (reverse beg end)
+(defun cmdlist--sort-newcmds (reverse beg end)
   "Variant of `sort-lines' (using the amazingly flexible `sort-subr') which keeps each (possibly multi-line) `\\newcommand' together, along with any lines before it up to the previous `\\newcommand'. Also ignores case."
   (interactive "P\nr")
-  (cmdlist-save-everything
+  (cmdlist--save-everything
     (narrow-to-region beg end)
     (goto-char (point-min))
     (let ;; To make `end-of-line' and etc. to ignore fields.
@@ -385,10 +392,10 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
          (sort-fold-case t))
       (sort-subr reverse 'forward-line
                  (lambda ()
-                   (cmdlist-re-search-backward-incl "\\\\r?e?newcommand")
+                   (cmdlist--re-search-backward-incl "\\\\r?e?newcommand")
                    (re-search-forward "\\\\r?e?newcommand")
-                   (when (eq (char-after) ?\{) (cmdlist-forward-brexp))
-                   (cmdlist-forward-brexp)
+                   (when (eq (char-after) ?\{) (cmdlist--forward-brexp))
+                   (cmdlist--forward-brexp)
                    (end-of-line))
                  (lambda () (re-search-forward "\\\\r?e?newcommand{?") nil)))))
 
@@ -396,9 +403,9 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 ;; Finding commands in a list of \newcommands ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun cmdlist-get-cmdlist-matches (cmdlist name)
+(defun cmdlist--get-cmdlist-matches (cmdlist name)
   "Return all elements of CMDLIST which are `\\\(re\)newcommand's defining the command NAME."
-  (cmdlist-dofilter (cmd cmdlist)
+  (cmdlist--dofilter (cmd cmdlist)
     (or
      (string-prefix-p (concat "\\newcommand{\\" name "}") cmd)
      (string-prefix-p (concat "\\newcommand\\" name "[") cmd)
@@ -407,19 +414,19 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
      (string-prefix-p (concat "\\renewcommand\\" name "[") cmd)
      (string-prefix-p (concat "\\renewcommand\\" name "{") cmd))))
 
-(defun cmdlist-select-cmds-from-cmdlist (cmdlist names exceptions)
+(defun cmdlist--select-cmds-from-cmdlist (cmdlist names exceptions)
   "For each element of NAMES which is not in EXCEPTION, get all elements of CMDLIST which are `\\newcommand's defining this element, and return them in a list. Each time there are multiple matches, the user is queried for a choice."
   (let ((choices))
     (dolist (name names)
       (unless (member name exceptions)
-        (let ((cmds (cmdlist-get-cmdlist-matches cmdlist name))
+        (let ((cmds (cmdlist--get-cmdlist-matches cmdlist name))
               (cmd))
           (if (> (length cmds) 1)
               (let ((prompt ""))
-                (setq prompt (cmdlist-list-of-things cmds))
+                (setq prompt (cmdlist--list-of-things cmds))
                 (setq prompt (concat prompt "\nMultiple entries for " name ". Choose from above: "))
                 (setq cmd (nth
-                           (- (cmdlist-prompt-for-number prompt 1 (length cmds)) 1)
+                           (- (cmdlist--prompt-for-number prompt 1 (length cmds)) 1)
                            cmds)))
             (when cmds
               (setq cmd (nth 0 cmds))))
@@ -427,46 +434,34 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
             (push cmd choices)))))
     choices))
 
-;; We no longer use this as it has been replaced by `cmdlist-replace-prompt', but we are keeping it around for now anyway.
-(defun cmdlist-already-p (cmdlist entry)
-  "If the command defined in ENTRY is in CMDLIST, display all matches and ask the user to proceed."
-  (let* ((name (cmdlist-newcmd-name entry))
-         (matches (cmdlist-get-cmdlist-matches cmdlist name)))
-    (if (not matches) t
-      (let ((prompt))
-        (setq prompt (cmdlist-list-of-things matches))
-        (setq prompt (concat prompt
-                             (concat "\n" name " already defined. Continue anyway? ")))
-        (y-or-n-p prompt)))))
-
-(defun cmdlist-replace-prompt (cmdlist entry)
+(defun cmdlist--replace-prompt (cmdlist entry)
   "If the command defined in ENTRY is not in CMDLIST, return `t'. Otherwise, display all matches and ask the user to proceed. The user may select an entry to replace, which is then returned, cancel, in which case `nil' is return, or choose to add a new entry, in which `t' is returned."
-  (let* ((name (cmdlist-newcmd-name entry))
-         (matches (cmdlist-get-cmdlist-matches cmdlist name))
+  (let* ((name (cmdlist--newcmd-name entry))
+         (matches (cmdlist--get-cmdlist-matches cmdlist name))
          (many (< 1(length matches))))
     (if (not matches) t
       (cl-case (car (read-multiple-choice
                   (concat "\"" name "\" already defined. Previous definition"
                           (when many "s")
                           ":\n"
-                          (cmdlist-list-of-things matches "  ")
+                          (cmdlist--list-of-things matches "  ")
                           "\n\nWhat would you like to do?")
                   `((?q "quit")
                     (?r ,(concat "replace " (when many "an ") "existing definition"))
                     (?a "add a new definition"))))
         (?q nil)
         (?a t)
-        (?r (cmdlist-singleton-or-prompt matches "Which definition to replace? "))))))
+        (?r (cmdlist--singleton-or-prompt matches "Which definition to replace? "))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Modifying buffer and adding new commands ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun cmdlist-stick-at-top (heading text &optional sortfun)
+(defun cmdlist--stick-at-top (heading text &optional sortfun)
   "Stick TEXT (or each string in TEXT) after the first occurrence of HEADING, then sort it using SORTFUN if non-nil.
 If HEADING does not occur, first insert HEADING before \\begin{document}"
   (let ((starting-point))
-    (cmdlist-save-everything
+    (cmdlist--save-everything
       (if (buffer-narrowed-p) (widen))
       (goto-char (point-min))
       (unless (search-forward heading nil t)
@@ -486,16 +481,16 @@ If HEADING does not occur, first insert HEADING before \\begin{document}"
       (when sortfun
         (funcall sortfun nil starting-point (point))))))
 
-(defun cmdlist-add-to-cmdlist-file (newcmd &optional file)
+(defun cmdlist--add-to-cmdlist-file (newcmd &optional file)
   "Add NEWCMD to FILE (default: the first entry in `cmdlist-files') and then sort the lines.
 
 If the command being defined in NEWCMD is already in FILE, ask for confirmation."
   (unless file (setq file (car cmdlist-files)))
   (if (and (file-readable-p file) (file-writable-p file))
-      (let ((cmdlist (cmdlist-scan-file-for-newcmds file)))
-        (let ((action (cmdlist-replace-prompt cmdlist newcmd)))
+      (let ((cmdlist (cmdlist--scan-file-for-newcmds file)))
+        (let ((action (cmdlist--replace-prompt cmdlist newcmd)))
           (if action
-              (cmdlist-save-everything
+              (cmdlist--save-everything
                 (let ((fibuf (find-file-noselect file)))
                   (with-current-buffer fibuf
                     (unless (eq t action)
@@ -505,7 +500,7 @@ If the command being defined in NEWCMD is already in FILE, ask for confirmation.
                     (goto-char (point-min))
                     (insert newcmd)
                     (insert "\n")
-                    (cmdlist-sort-newcmds nil (point-min) (point-max))
+                    (cmdlist--sort-newcmds nil (point-min) (point-max))
                     (save-buffer))
                   (if (not cmdlist-visit-after-adding)
                       (kill-buffer fibuf)
@@ -520,34 +515,34 @@ If the command being defined in NEWCMD is already in FILE, ask for confirmation.
             (message "Operation cancelled."))))
     (message "File %s does not exist or not readable/writable." file)))
 
-(defun cmdlist-add-newcmd (newcmd &optional heading file)
+(defun cmdlist--add-newcmd (newcmd &optional heading file)
   "Add the given new command to the top of the file under HEADING (default: `cmdlist-heading'), asking for confirmation if already defined.
 
 If FILE is given, instead add it to FILE. If FILE is `t', it is set to the first element of `cmdlist-files'."
   (if file
       (progn
         (unless (stringp file) (setq file (car cmdlist-files)))
-        (cmdlist-add-to-cmdlist-file newcmd file))
+        (cmdlist--add-to-cmdlist-file newcmd file))
     (unless heading (setq heading cmdlist-heading))
-    (let ((action (cmdlist-replace-prompt (cmdlist-scan-for-newcmds) newcmd)))
+    (let ((action (cmdlist--replace-prompt (cmdlist--scan-for-newcmds) newcmd)))
       (if (not action)
           (message "Operation cancelled")
         (unless (eq t action)
-          (cmdlist-save-everything
+          (cmdlist--save-everything
             (goto-char (point-min))
             (search-forward (concat action "\n"))
             (delete-region (match-beginning 0) (match-end 0))))
-        (cmdlist-stick-at-top heading newcmd 'cmdlist-sort-newcmds)
+        (cmdlist--stick-at-top heading newcmd 'cmdlist--sort-newcmds)
         (message "New entry\n  %s\nadded under %s ." newcmd heading)))))
 
-(defun cmdlist-generate-newcmd ()
+(defun cmdlist--generate-newcmd ()
   "Generate a `\\newcommand' and return it. The name and definition of the new macro are queried for.
 
 The number of arguments is guessed by how many are used in the command. If there is at least one, query for an optional argument.
 
 If there is a macro under the current point, the default name is
 this macro."
-  (let* ((name (cmdlist-latex-cmd-under-point))
+  (let* ((name (cmdlist--latex-cmd-under-point))
          (defn)
          (numargs)
          (optional))
@@ -555,13 +550,13 @@ this macro."
         (setq name ""))
     (setq name (read-from-minibuffer "Name of new command? \\" name))
     (setq defn (read-from-minibuffer (concat "Definition of command \\" name " ? ")))
-    (setq numargs (cmdlist-num-args-in-defn defn))
+    (setq numargs (cmdlist--num-args-in-defn defn))
     (when (and (> numargs 0)
                (y-or-n-p "Optional argument? "))
       (setq optional
             (read-from-minibuffer (format "Default optional argument for \\%s[%d]? "
                                           name numargs))))
-    (cmdlist-assemble-newcmd name defn numargs optional)))
+    (cmdlist--assemble-newcmd name defn numargs optional)))
 
 (defun cmdlist-update-latex-buffer (&optional heading files prefix)
   "Add to current buffer under HEADING all commands defined in FILES which are present in the current file and not already defined. If PREFIX is non-nil, it is prepended to `\\newcommand'.
@@ -571,15 +566,15 @@ By default HEADING is `cmdlist-heading' and FILES are the files in the variable 
   (unless heading (setq heading cmdlist-heading))
   (unless files (setq files cmdlist-files))
   (unless prefix (setq prefix ""))
-  (let* ((cmdlist (apply 'append (mapcar 'cmdlist-scan-file-for-newcmds files)))
-         (cmds (cmdlist-scan-for-latex-cmds))
-         (exceptions (append (mapcar 'cmdlist-newcmd-name (cmdlist-scan-for-newcmds)) (cmdlist-scan-for-other-defined-cmds) cmdlist-newcommands-to-ignore))
-         (newcmds (cmdlist-select-cmds-from-cmdlist cmdlist cmds exceptions)))
+  (let* ((cmdlist (apply 'append (mapcar 'cmdlist--scan-file-for-newcmds files)))
+         (cmds (cmdlist--scan-for-latex-cmds))
+         (exceptions (append (mapcar 'cmdlist--newcmd-name (cmdlist--scan-for-newcmds)) (cmdlist--scan-for-other-defined-cmds) cmdlist-newcommands-to-ignore))
+         (newcmds (cmdlist--select-cmds-from-cmdlist cmdlist cmds exceptions)))
     (if newcmds
         (progn
           (setq newcmds (mapcar (lambda (x) (concat prefix x)) newcmds))
-          (cmdlist-stick-at-top heading newcmds 'cmdlist-sort-newcmds)
-          (message "Added %d new commands:\n%s" (length newcmds) (cmdlist-list-of-things newcmds)))
+          (cmdlist--stick-at-top heading newcmds 'cmdlist--sort-newcmds)
+          (message "Added %d new commands:\n%s" (length newcmds) (cmdlist--list-of-things newcmds)))
       (message "No commands added."))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -589,32 +584,32 @@ By default HEADING is `cmdlist-heading' and FILES are the files in the variable 
 (defun cmdlist-add-cmd-to-file ()
   "Add the `\\newcommand' definition under point to the first entry of `cmdlist-files'."
   (interactive)
-  (let ((newcmd (cmdlist-surrounding-newcmd)))
+  (let ((newcmd (cmdlist--surrounding-newcmd)))
     (when newcmd
-      (cmdlist-add-newcmd (cmdlist-surrounding-newcmd) nil t))))
+      (cmdlist--add-newcmd (cmdlist--surrounding-newcmd) nil t))))
 
 (defun cmdlist-generate-and-add-cmd (tofile)
-    "Generate a `\\newcommand' with `cmdlist-generate-newcmd' and add it to current file under `cmdlist-heading'. With or without prefix argument (depending on `cmdlist-add-to-file-default'), add to first entry of `cmdlist-files' instead."
+    "Generate a `\\newcommand' with `cmdlist--generate-newcmd' and add it to current file under `cmdlist-heading'. With or without prefix argument (depending on `cmdlist-add-to-file-default'), add to first entry of `cmdlist-files' instead."
     (interactive "P")
     (when cmdlist-add-to-file-default
       (setq tofile (not tofile)))
-    (let* ((newcmd (cmdlist-generate-newcmd))
+    (let* ((newcmd (cmdlist--generate-newcmd))
            (tobuf (and tofile
                        cmdlist-also-add-to-buffer
                        (if (eq cmdlist-also-add-to-buffer 'ask)
                            (y-or-n-p (format "Also add\n  %s\nto buffer?" newcmd)) t))))
-      (cmdlist-add-newcmd newcmd nil (when tofile t))
+      (cmdlist--add-newcmd newcmd nil (when tofile t))
       (when tobuf
-        (cmdlist-add-newcmd newcmd nil nil))))
+        (cmdlist--add-newcmd newcmd nil nil))))
 
 (defun cmdlist-generate-and-add-fontletter (font &optional heading file)
-  "Generate a ``\\newcommand'' of the form `\\newcomand\\name{\\FONT{letter}}' and add it to the current buffer or to FILE with `cmdlist-add-newcmd' (hence FILE can be `t').
+  "Generate a ``\\newcommand'' of the form `\\newcomand\\name{\\FONT{letter}}' and add it to the current buffer or to FILE with `cmdlist--add-newcmd' (hence FILE can be `t').
 
 The name and letter are queried for, and by default are both the latex macro under point."
   (let* ((name (read-from-minibuffer
-                (format "Name of %s command? \\" font) (cmdlist-latex-cmd-under-point)))
+                (format "Name of %s command? \\" font) (cmdlist--latex-cmd-under-point)))
          (letter (read-from-minibuffer "Text? " name)))
-    (cmdlist-add-newcmd (cmdlist-assemble-newcmd name (format "\\%s{%s}" font letter)) heading file)))
+    (cmdlist--add-newcmd (cmdlist--assemble-newcmd name (format "\\%s{%s}" font letter)) heading file)))
 
 (defun cmdlist-generate-mathbb (tofile)
   "Run `cmdlist-generate-and-add-fontletter' with `mathbb'. Prefix argument puts it in the cmdlist file."
@@ -650,29 +645,29 @@ The name and letter are queried for, and by default are both the latex macro und
   "Ask for a package name and stick it under `% Packages'"
   (interactive)
   (let ((name (read-from-minibuffer "Package name? ")))
-    (cmdlist-stick-at-top "% Packages" (concat "\\usepackage{" name "}"))))
+    (cmdlist--stick-at-top "% Packages" (concat "\\usepackage{" name "}"))))
 
 (defun cmdlist-get-unused-newcmds (&optional whole-buffer)
   "Return a list of `\\newcommand's in this buffer which are (apparently) not being used. If whole-buffer is nil, restrict to the commands under `cmdlist-heading'."
-  (let* ((cmds (cmdlist-scan-for-latex-cmds t))
+  (let* ((cmds (cmdlist--scan-for-latex-cmds t))
          (newcmds
           (if whole-buffer
-              (cmdlist-scan-for-newcmds)
-            (cmdlist-save-everything
+              (cmdlist--scan-for-newcmds)
+            (cmdlist--save-everything
               (goto-char (point-min))
               (search-forward cmdlist-heading)
               (let ((st (point)))
                 (search-forward "\n\n")
                 (narrow-to-region st (point))
-                (cmdlist-scan-for-newcmds)))))
-         (unuseds (cmdlist-dofilter (x newcmds)
-                    (not (member (cmdlist-newcmd-name x) cmds)))))
+                (cmdlist--scan-for-newcmds)))))
+         (unuseds (cmdlist--dofilter (x newcmds)
+                    (not (member (cmdlist--newcmd-name x) cmds)))))
     unuseds))
 
 (defun cmdlist-show-unused-newcmds ()
   "Display `\\newcommand's in this buffer which are (apparently) not being used."
   (interactive)
-  (let ((unuseds (append (cmdlist-get-unused-newcmds) (cmdlist-get-unused-newthms))))
+  (let ((unuseds (append (cmdlist-get-unused-newcmds) (cmdlist--get-unused-newthms))))
     (if unuseds
         (message "Seemingly unused commands:\n\n%s" (mapconcat #'identity unuseds "\n"))
       (message "No unused commands found"))))
@@ -680,11 +675,11 @@ The name and letter are queried for, and by default are both the latex macro und
 (defun cmdlist-delete-unused-newcmds ()
   "Delete (seemingly) unused `\\\(re\)newcommand's and `\\\\newtheorem's in this buffer, after prompting."
   (interactive)
-  (let ((unuseds (append (cmdlist-get-unused-newcmds) (cmdlist-get-unused-newthms))))
+  (let ((unuseds (append (cmdlist-get-unused-newcmds) (cmdlist--get-unused-newthms))))
     (if unuseds
-        (when (y-or-n-p (format "Seemingly unused commands:\n%s\nDelete? " (cmdlist-list-of-things unuseds)))
+        (when (y-or-n-p (format "Seemingly unused commands:\n%s\nDelete? " (cmdlist--list-of-things unuseds)))
           (dolist (x unuseds)
-            (cmdlist-save-everything
+            (cmdlist--save-everything
               (goto-char (point-min))
               (let ((case-fold-search nil))
                 (search-forward x))
@@ -696,17 +691,17 @@ The name and letter are queried for, and by default are both the latex macro und
 (defun cmdlist-open-cmdlist-file ()
   "`(find-file-other-window (car cmdlist-files))'"
   (interactive)
-  (let ((cmd (cmdlist-latex-cmd-under-point)))
+  (let ((cmd (cmdlist--latex-cmd-under-point)))
     (find-file-other-window (car cmdlist-files))
     ;; Use swiper if possible
     (if (require 'swiper nil t)
         (swiper)
       (setq cmd (completing-read "Goto command: "
-                                 (mapcar 'cmdlist-newcmd-name (cmdlist-scan-for-newcmds))
+                                 (mapcar 'cmdlist--newcmd-name (cmdlist--scan-for-newcmds))
                                  nil nil nil nil cmd))
       (when cmd
         (let ((cmd-pos))
-          (cmdlist-save-everything
+          (cmdlist--save-everything
             (goto-char (point-min))
             (when (re-search-forward (format "\\\\r?e?newcommand{?\\\\%s[}{\\[]" cmd) nil t)
               (setq cmd-pos (point))))
@@ -744,18 +739,18 @@ The name and letter are queried for, and by default are both the latex macro und
 ;; Environments and theorems ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun cmdlist-scan-for-latex-envs ()
+(defun cmdlist--scan-for-latex-envs ()
   "Return all names of latex environments in current buffer."
   (let (envs)
-    (cmdlist-save-everything
+    (cmdlist--save-everything
       (goto-char (point-min))
       (while (search-forward "\\begin{" nil t)
         (backward-char)
-        (push (car (split-string (cmdlist-shloop-latex-arg) nil nil "[{}]")) envs)))
+        (push (car (split-string (cmdlist--shloop-latex-arg) nil nil "[{}]")) envs)))
     (reverse (delete-dups envs))))
 
-(defun cmdlist-stick-thm-at-top (text &optional style shared-counter parent-counter)
-  "Run cmdlist-stick-at-top with TEXT and with heading set to `\theoremstyle{STYLE}' (by default, STYLE is read from a comment at the end of text, which is removed, and is otherwise `plain'), and with no sorting. If SHARED-COUNTER is provided, add it as an optional argument after the first argument. Otherwise, if PARENT-COUNTER is provided, add it as an optional argument after the second argument. Otherwise, if `cmdlist-default-shared-counter' is non-nil, use that as SHARED-COUNTER. Otherwise, if `cmdlist-default-parent-counter' is non-nil, use that as PARENT-COUNTER."
+(defun cmdlist--stick-thm-at-top (text &optional style shared-counter parent-counter)
+  "Run cmdlist--stick-at-top with TEXT and with heading set to `\theoremstyle{STYLE}' (by default, STYLE is read from a comment at the end of text, which is removed, and is otherwise `plain'), and with no sorting. If SHARED-COUNTER is provided, add it as an optional argument after the first argument. Otherwise, if PARENT-COUNTER is provided, add it as an optional argument after the second argument. Otherwise, if `cmdlist-default-shared-counter' is non-nil, use that as SHARED-COUNTER. Otherwise, if `cmdlist-default-parent-counter' is non-nil, use that as PARENT-COUNTER."
   (unless (or shared-counter parent-counter)
     (setq shared-counter cmdlist-default-shared-counter)
     (setq parent-counter cmdlist-default-parent-counter))
@@ -782,71 +777,71 @@ The name and letter are queried for, and by default are both the latex macro und
           (when (and parent-counter (search-forward "}"))
             (insert "[" parent-counter "]")))))
     (setq text (buffer-substring-no-properties (point-min) (point-max))))
-  (cmdlist-stick-at-top (concat "\\theoremstyle{" style "}") text))
+  (cmdlist--stick-at-top (concat "\\theoremstyle{" style "}") text))
 
-(defun cmdlist-scan-for-newthms ()
+(defun cmdlist--scan-for-newthms ()
   "Return a list of all `\\newtheorem's in the current buffer"
-  ;; This is adapted from cmdlist-scan-for-newcmds. Perhaps something should be factored out?
+  ;; This is adapted from cmdlist--scan-for-newcmds. Perhaps something should be factored out?
   (let ((res))
-    (cmdlist-save-everything
+    (cmdlist--save-everything
       (goto-char (point-min))
       (while (re-search-forward "\\\\newtheorem[^a-z]" nil t)
-        (push (cmdlist-surrounding-newcmd "\\\\newtheorem\\*?") res)
-        (cmdlist-forward-brexp)))
+        (push (cmdlist--surrounding-newcmd "\\\\newtheorem\\*?") res)
+        (cmdlist--forward-brexp)))
     (reverse res)))
 
-(defun cmdlist-get-unused-newthms ()
+(defun cmdlist--get-unused-newthms ()
   "Return a list of `\\newtheorem's in this buffer which are (apparently) not being used."
   ;; This is adapted from `cmdlist-get-unused-newcmds'. Perhaps something should be factored out?
-  (let* ((envs (append (cmdlist-scan-for-latex-envs) (cmdlist-get-newtheorem-dependencies)))
-         (newthms (cmdlist-scan-for-newthms))
-         (unuseds (cmdlist-dofilter (x newthms)
-                    (not (member (cmdlist-newcmd-name x "\\newtheorem\\*?") envs)))))
+  (let* ((envs (append (cmdlist--scan-for-latex-envs) (cmdlist--get-newtheorem-dependencies)))
+         (newthms (cmdlist--scan-for-newthms))
+         (unuseds (cmdlist--dofilter (x newthms)
+                    (not (member (cmdlist--newcmd-name x "\\newtheorem\\*?") envs)))))
     unuseds))
 
-(defun cmdlist-scan-file-for-newthms (file)
+(defun cmdlist--scan-file-for-newthms (file)
   "Return a list of all `\\newtheorem's in the given file"
-  ;; This is adapted from `cmdlist-scan-file-for-newcmds'. Perhaps something should be factored out?
+  ;; This is adapted from `cmdlist--scan-file-for-newcmds'. Perhaps something should be factored out?
   (save-mark-and-excursion
     (with-temp-buffer
       (insert-file-contents file)
-      (cmdlist-scan-for-newthms))))
+      (cmdlist--scan-for-newthms))))
 
-(defun cmdlist-get-newtheorem-dependencies ()
+(defun cmdlist--get-newtheorem-dependencies ()
   "Get all the commands included in square brackets in newtheorem commands."
     (let (res)
-      (cmdlist-save-everything
+      (cmdlist--save-everything
         (goto-char (point-min))
         (while (re-search-forward "\\\\newtheorem\\*?{[a-zA-Z]*}\\[\\([a-zA-Z]*\\)\\]" nil t)
           (add-to-list 'res (match-string-no-properties 1)))
         res)))
 
 (defun cmdlist-newthm-update-latex-buffer (&optional file)
-  "Add to current buffer all ``\\newtheorem's defined in FILE (using `cmdlist-stick-thm-at-top') which are present in the current file and not already defined. By default FILE is `cmdlist-theorem-file'."
+  "Add to current buffer all ``\\newtheorem's defined in FILE (using `cmdlist--stick-thm-at-top') which are present in the current file and not already defined. By default FILE is `cmdlist-theorem-file'."
   ;; This is adapted from `cmdlist-update-latex-buffer'. Perhaps something should be factored out?
   (interactive)
   (unless file (setq file cmdlist-theorem-file))
-  (let* ((thmlist (cmdlist-scan-file-for-newthms file))
-         (envs (append (cmdlist-scan-for-latex-envs) (cmdlist-get-newtheorem-dependencies)))
-         (exceptions (mapcar #'(lambda (x) (cmdlist-newcmd-name x "\\newtheorem\\*?")) (cmdlist-scan-for-newthms)))
+  (let* ((thmlist (cmdlist--scan-file-for-newthms file))
+         (envs (append (cmdlist--scan-for-latex-envs) (cmdlist--get-newtheorem-dependencies)))
+         (exceptions (mapcar #'(lambda (x) (cmdlist--newcmd-name x "\\newtheorem\\*?")) (cmdlist--scan-for-newthms)))
          (newthms
-          (cmdlist-dofilter (thm thmlist)
-            (and (member (cmdlist-newcmd-name thm "\\newtheorem\\*?") envs)
-                 (not (member (cmdlist-newcmd-name thm "\\newtheorem\\*?") exceptions))))))
+          (cmdlist--dofilter (thm thmlist)
+            (and (member (cmdlist--newcmd-name thm "\\newtheorem\\*?") envs)
+                 (not (member (cmdlist--newcmd-name thm "\\newtheorem\\*?") exceptions))))))
     (if newthms
         (progn
           (dolist (thm newthms)
-            (cmdlist-stick-thm-at-top thm))
-          (message "Added %d new theorem:\n%s" (length newthms) (cmdlist-list-of-things newthms)))
+            (cmdlist--stick-thm-at-top thm))
+          (message "Added %d new theorem:\n%s" (length newthms) (cmdlist--list-of-things newthms)))
       (message "No theorems added."))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Packages and built-ins ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun cmdlist-package-and-class-sort ()
+(defun cmdlist--package-and-class-sort ()
   "Sort lines in buffer ignoring initial `\\usepackage' or `\\documentclass'."
-  (cmdlist-save-everything
+  (cmdlist--save-everything
     (goto-char (point-min))
     (let ((sort-fold-case t))
       (sort-subr nil 'forward-line 'end-of-line
@@ -855,7 +850,7 @@ The name and letter are queried for, and by default are both the latex macro und
                      (and (re-search-forward
                            "^\\\\\\(usepackage\\|documentclass\\)" nil t) nil)))))))
 
-(defun cmdlist-scan-package-file (packages &optional recurse file pkgs-instead)
+(defun cmdlist--scan-package-file (packages &optional recurse file pkgs-instead)
   "Return a list of all comma-separated entries appearing after `%'s in FILE (default is `cmdlist-package-file') in lines defining packages in PACKAGES. If RECURSE is non-nil, also recursively include entries appearing in packages appearing after the second `%' in some line. If PKGS-INSTEAD is non-nil, return the entries after the second `%' instead of the first."
   (unless file (setq file cmdlist-package-file))
   ;; If we're recursing, add all packages.
@@ -863,7 +858,7 @@ The name and letter are queried for, and by default are both the latex macro und
     (let ((new-pkgs packages))
       (while new-pkgs
         (let ((newer-pkgs ()))
-          (dolist (p (cmdlist-scan-package-file new-pkgs nil file t))
+          (dolist (p (cmdlist--scan-package-file new-pkgs nil file t))
             (when (not (member p packages))
               (push p packages)
               (push p newer-pkgs)))
@@ -875,7 +870,7 @@ The name and letter are queried for, and by default are both the latex macro und
     (with-temp-buffer
       (insert-file-contents file)
       ;; Make sure we're sorted here too
-      (cmdlist-package-and-class-sort)
+      (cmdlist--package-and-class-sort)
       (dolist (p packages)
         (goto-char (point-min))
         (when (and (re-search-forward (concat "^\\\\\\(usepackage\\|documentclass\\){"
@@ -889,7 +884,7 @@ The name and letter are queried for, and by default are both the latex macro und
                              "") "," t)))))
       (cl-remove-duplicates result))))
 
-(defun cmdlist-match-in-package-file (name &optional recurse file)
+(defun cmdlist--match-in-package-file (name &optional recurse file)
   "Return a list of all lines (minus final `%.*' in FILE (default `cmdlist-package-file)) which start with `\\usepackage' and include NAME in a comma-separated list after a `%'. If RECURSE is non-nil, also recursively return any lines which have a package after their second `%' which provides NAME."
   (unless file (setq file cmdlist-package-file))
   (with-temp-buffer
@@ -914,60 +909,53 @@ The name and letter are queried for, and by default are both the latex macro und
         (setq is-pkg t))
       res)))
 
-(defun cmdlist-read-lines (file)
-  "Read lines of file into a list and return it, or nil if file does not exist."
-  (when (file-exists-p file)
-    (with-temp-buffer
-      (insert-file-contents file)
-      (split-string (buffer-string) "\n" t))))
-
-(defun cmdlist-scan-for-defined-envs ()
+(defun cmdlist--scan-for-defined-envs ()
   "Return a list of all environments defined by `\\\(re\)newenvironment's in the current buffer."
   (let ((res))
-    (cmdlist-save-everything
+    (cmdlist--save-everything
       (goto-char (point-min))
       (while (re-search-forward "\\\\r?e?newenvironment" nil t)
-        (push (car (split-string (cmdlist-shloop-latex-arg) nil nil "[{}]")) res)))
+        (push (car (split-string (cmdlist--shloop-latex-arg) nil nil "[{}]")) res)))
         (reverse res)))
 
-(defun cmdlist-scan-for-packages ()
+(defun cmdlist--scan-for-packages ()
   "Return a list of all packages `\\usepackage'd in current buffer."
   (let ((res))
-    (cmdlist-save-everything
+    (cmdlist--save-everything
       (goto-char (point-min))
       (while (re-search-forward "\\\\\\(usepackage\\|RequirePackage\\)" nil t)
         (while (not (eq (char-after) ?{)) (forward-sexp))
-        (push (car (split-string (cmdlist-shloop-latex-arg) nil nil "[{}]")) res)))
+        (push (car (split-string (cmdlist--shloop-latex-arg) nil nil "[{}]")) res)))
     (reverse res)))
 
-(defun cmdlist-get-document-class ()
+(defun cmdlist--get-document-class ()
   "Return a singleton list with the document class of this document or `nil'."
-  (cmdlist-save-everything
+  (cmdlist--save-everything
     (goto-char (point-min))
     (when (search-forward "\\documentclass")
       (while (not (eq (char-after) ?{)) (forward-sexp))
       ;; list car is just to make it clearer what's happening
-      (list (car (split-string (cmdlist-shloop-latex-arg) nil nil "[{}]"))))))
+      (list (car (split-string (cmdlist--shloop-latex-arg) nil nil "[{}]"))))))
 
-(defun cmdlist-singleton-or-prompt (l prompt)
+(defun cmdlist--singleton-or-prompt (l prompt)
   "L should be a list of strings. If L is a singleton, return it, otherwise prompt with PROMPT for an element to choose. If L is empty, return nil."
-  ;; Adapted from `cmdlist-select-cmds-from-cmdlist'. Something should probably be factored out.
+  ;; Adapted from `cmdlist--select-cmds-from-cmdlist'. Something should probably be factored out.
   (when l
     (if (= (length l) 1)
         (car l)
-      (setq prompt (concat (cmdlist-list-of-things l) "\n" prompt))
+      (setq prompt (concat (cmdlist--list-of-things l) "\n" prompt))
       (let ((choice (nth
-                     (- (cmdlist-prompt-for-number prompt 1 (length l)) 1)
+                     (- (cmdlist--prompt-for-number prompt 1 (length l)) 1)
                      l)))
         choice))))
 
-(defun cmdlist-choose-and-add-package-or-class (cmd &optional package-file class pkgchoice)
+(defun cmdlist--choose-and-add-package-or-class (cmd &optional package-file class pkgchoice)
   "Prompt for a package (or if CLASS, document class) from PACKAGE-FILE (default `cmdlist-package-file') and add cmd to it. Create a new package or class if necessary. Then sort the package file. Return a newline-terminated message explaining what happened. If PKGCHOICE is non-nil, use that as chosen package or document class instead of prompting."
   (unless package-file (setq package-file cmdlist-package-file))
   (let* ((definer (if class "\\documentclass" "\\usepackage"))
          (pkg-or-class-list
-          (mapcar #'(lambda (x) (cmdlist-newcmd-name x definer))
-                  (cmdlist-dofilter (x (cmdlist-read-lines package-file))
+          (mapcar #'(lambda (x) (cmdlist--newcmd-name x definer))
+                  (cmdlist--dofilter (x (cmdlist--read-lines package-file))
                     (string-prefix-p definer x))))
          (pkg
           (or pkgchoice
@@ -996,17 +984,17 @@ The name and letter are queried for, and by default are both the latex macro und
         ;; In case the file is not newline-terminated as it should be
         (unless (or (eq (point) (point-min)) (eq (char-before) ?\n)) (insert "\n"))
         (insert (if class "\\documentclass{" "\\usepackage{") pkg "}%" cmd "\n"))
-      (cmdlist-package-and-class-sort))
+      (cmdlist--package-and-class-sort))
     (concat "`" cmd "' added to package `" pkg "'\n")))
 
-(defun cmdlist-local-cmds-filename ()
+(defun cmdlist--local-cmds-filename ()
   (concat "/tmp/" (replace-regexp-in-string "/" ":" (buffer-file-name)) ".tmp.commands"))
 
 (defun cmdlist-test-command-in-minimal-file (&optional name)
   "Create and visit the file `cmdlist-test-minimal-file', and populate it with a minimal LaTeX file including the command which is prompted for (and defaults to the LaTeX command under point), so that you can test whether it is a built in command (or try to figure out what packages/document classes provide it."
   (interactive)
   (unless name
-    (setq name (read-from-minibuffer "Command? " (cmdlist-latex-cmd-under-point))))
+    (setq name (read-from-minibuffer "Command? " (cmdlist--latex-cmd-under-point))))
   (find-file cmdlist-test-minimal-file)
   (delete-region (point-min) (point-max))
   (insert
@@ -1016,14 +1004,14 @@ The name and letter are queried for, and by default are both the latex macro und
    "  \\" name "\n"
    "\\end{document}\n"))
 
-(defun cmdlist-act-on-orphaned-command (c-or-e &optional prompt heading package-file builtin-file allow-edit-here)
+(defun cmdlist--act-on-orphaned-command (c-or-e &optional prompt heading package-file builtin-file allow-edit-here)
   "Give the option of assign the given command or environment name to a package, or to add it to the list of builtin commands. Return a newline-terminated message saying what happened. If ALLOW-EDIT-HERE is non-nil, offer option to edit buffer at current position or to run `cmdlist-test-command-in-minimal-file'. In either case, `throw' the symbol `edit-here' with a cons pair, in which the second element is the current point, and the first element is the symbol `edit' or `c-or-e', respectively."
   (unless prompt (setq prompt ""))
   (unless heading (setq heading cmdlist-package-heading))
   (unless package-file (setq package-file cmdlist-package-file))
   (unless builtin-file (setq builtin-file cmdlist-builtin-file))
   ;; Prompt to add new builtin or add to a package
-  ;; TODO: this should perhaps use read-multiple-choice; alternatively, cmdlist-replace-prompt should use something more like this
+  ;; TODO: this should perhaps use read-multiple-choice; alternatively, cmdlist--replace-prompt should use something more like this
   (let ((decision
          (read-char (concat (propertize prompt 'face 'shadow)
                             (when (> (length prompt) 0)
@@ -1044,14 +1032,14 @@ The name and letter are queried for, and by default are both the latex macro und
      ((and allow-edit-here (eq decision ?t))
       (throw 'edit-here (cons c-or-e (point))))
      ((eq decision ?p)
-      (cmdlist-choose-and-add-package-or-class c-or-e package-file nil))
+      (cmdlist--choose-and-add-package-or-class c-or-e package-file nil))
      ((eq decision ?D)
-      (cmdlist-choose-and-add-package-or-class c-or-e package-file t))
+      (cmdlist--choose-and-add-package-or-class c-or-e package-file t))
      ((eq decision ?d)
-      (cmdlist-choose-and-add-package-or-class c-or-e package-file t
-                                               (car (cmdlist-get-document-class))))
+      (cmdlist--choose-and-add-package-or-class c-or-e package-file t
+                                               (car (cmdlist--get-document-class))))
      ((eq decision ?i)
-          (let ((fname (cmdlist-local-cmds-filename)))
+          (let ((fname (cmdlist--local-cmds-filename)))
             (with-temp-file fname
               (when (file-exists-p fname)
                 (insert-file fname))
@@ -1071,13 +1059,13 @@ The name and letter are queried for, and by default are both the latex macro und
            (sort-lines nil (point-min) (point-max))))
        (concat "`" c-or-e "' added as builtin\n")))))
 
-(defun cmdlist-scan-for-other-defined-cmds ()
+(defun cmdlist--scan-for-other-defined-cmds ()
   "Return a list of all commands defined in the current buffer using commands in `cmdlist-cmd-defining-cmds'."
-  ;; This is adapted from cmdlist-scan-for-newcmds. Perhaps something should be factored out?
+  ;; This is adapted from cmdlist--scan-for-newcmds. Perhaps something should be factored out?
   (let* ((res)
          (cmds (mapcar (lambda (x) (if (stringp x) x (car x))) cmdlist-cmd-defining-cmds))
          (regx (concat "\\\\\\(" (mapconcat 'regexp-quote cmds "\\|") "\\)[^a-z]")))
-    (cmdlist-save-everything
+    (cmdlist--save-everything
       (goto-char (point-min))
       (while (re-search-forward regx nil t)
         (let ((match (match-string-no-properties 1))
@@ -1086,7 +1074,7 @@ The name and letter are queried for, and by default are both the latex macro und
                   ;; Take back the "look-ahead" in the regex
                   (backward-char)
                   ;; Remove any surrounding brackets and backslashes
-                  (car (split-string (cmdlist-shloop-latex-arg) nil nil "\\\\?[{}]*")))))
+                  (car (split-string (cmdlist--shloop-latex-arg) nil nil "\\\\?[{}]*")))))
           (if (member match cmdlist-cmd-defining-cmds)
               (push defined-cmd res)
             (let ((generated-cmds
@@ -1098,19 +1086,19 @@ The name and letter are queried for, and by default are both the latex macro und
               (dolist (c generated-cmds) (push c res)))))))
     (reverse res)))
 
-(defun cmdlist-buffer-provided-cmds (&optional package-file builtin-file)
+(defun cmdlist--buffer-provided-cmds (&optional package-file builtin-file)
   "Get all commands which are defined or provided for in this buffer."
   (unless package-file (setq package-file cmdlist-package-file))
   (unless builtin-file (setq builtin-file cmdlist-builtin-file))
-  (append (cmdlist-read-lines builtin-file)
+  (append (cmdlist--read-lines builtin-file)
           ;; TODO: This is wasteful. These should be combined into a single command.
-          (mapcar 'cmdlist-newcmd-name (cmdlist-scan-for-newcmds))
-          (mapcar #'(lambda (x) (cmdlist-newcmd-name x "\\newtheorem\\*?")) (cmdlist-scan-for-newthms))
-          (cmdlist-scan-for-other-defined-cmds)
-          (cmdlist-scan-for-defined-envs)
+          (mapcar 'cmdlist--newcmd-name (cmdlist--scan-for-newcmds))
+          (mapcar #'(lambda (x) (cmdlist--newcmd-name x "\\newtheorem\\*?")) (cmdlist--scan-for-newthms))
+          (cmdlist--scan-for-other-defined-cmds)
+          (cmdlist--scan-for-defined-envs)
           (when (file-exists-p package-file)
-            (cmdlist-scan-package-file (append (cmdlist-scan-for-packages) (cmdlist-get-document-class)) t package-file))
-          (cmdlist-read-lines (cmdlist-local-cmds-filename))))
+            (cmdlist--scan-package-file (append (cmdlist--scan-for-packages) (cmdlist--get-document-class)) t package-file))
+          (cmdlist--read-lines (cmdlist--local-cmds-filename))))
 
 (defun cmdlist-package-update-latex-buffer (&optional heading package-file builtin-file)
   "Add to current buffer all ``\\usepackage's defined in PACKAGE-FILE (default is `cmdlist-package-file') under HEADING (default is `cmdlist-package-heading') which provide commands or environments present in the current file and not built-in (according to BUITLIN-FILE, default `cmdlist-builtin-file') or already defined. Prompt to act on any unmatched commands or enviornments."
@@ -1119,14 +1107,14 @@ The name and letter are queried for, and by default are both the latex macro und
   (unless heading (setq heading cmdlist-package-heading))
   (unless package-file (setq package-file cmdlist-package-file))
   (unless builtin-file (setq builtin-file cmdlist-builtin-file))
-  (let ((cmds-and-envs (append (cmdlist-scan-for-latex-cmds) (cmdlist-scan-for-latex-envs)))
-        (exceptions (cmdlist-buffer-provided-cmds package-file builtin-file))
+  (let ((cmds-and-envs (append (cmdlist--scan-for-latex-cmds) (cmdlist--scan-for-latex-envs)))
+        (exceptions (cmdlist--buffer-provided-cmds package-file builtin-file))
         (curex "")
         (lastmessage ""))
     ;; Warning! (sort) is destructive! (see above warning)
     (setq cmds-and-envs (cl-remove-duplicates (seq-sort 'string< cmds-and-envs)))
     (setq exceptions (cl-remove-duplicates (seq-sort 'string< exceptions)))
-    ;; This catches the `edit-here' possibly thrown by `cmdlist-act-on-orphaned-command' and goes to the point thrown by that `throw'
+    ;; This catches the `edit-here' possibly thrown by `cmdlist--act-on-orphaned-command' and goes to the point thrown by that `throw'
     (let ((edit-point
            (catch 'edit-here
              (dolist (c-or-e cmds-and-envs)
@@ -1138,20 +1126,20 @@ The name and letter are queried for, and by default are both the latex macro und
                                (setq curex (pop exceptions)))
                              (string= curex c-or-e)))
                  ;; Find a matching package
-                 (let ((pkgmatch (cmdlist-singleton-or-prompt
-                                  (cmdlist-match-in-package-file c-or-e t package-file)
+                 (let ((pkgmatch (cmdlist--singleton-or-prompt
+                                  (cmdlist--match-in-package-file c-or-e t package-file)
                                   (concat "\n Multiple packages provide `"
                                           c-or-e "'. Choose one: "))))
                    ;; If we found one, add it, and refresh exceptions.
                    (if pkgmatch
                        (progn
-                         (cmdlist-stick-at-top heading pkgmatch)
-                         (setq exceptions (cmdlist-buffer-provided-cmds package-file builtin-file))
+                         (cmdlist--stick-at-top heading pkgmatch)
+                         (setq exceptions (cmdlist--buffer-provided-cmds package-file builtin-file))
                          ;; Warning! (sort) is destructive! (see above warning)
                          (setq exceptions (cl-remove-duplicates (seq-sort 'string< exceptions)))
                          (setq curex ""))
                      ;; Otherwise, act on it
-                     (cmdlist-save-everything
+                     (cmdlist--save-everything
                        ;; Display the command in question in the buffer
                        (goto-char (point-min))
                        (let ((case-fold-search nil))
@@ -1160,7 +1148,7 @@ The name and letter are queried for, and by default are both the latex macro und
                                                     "\\($\\|[^a-zA-Z]\\)"))
                          (goto-char (match-beginning 0)))
                        (setq lastmessage
-                             (cmdlist-act-on-orphaned-command
+                             (cmdlist--act-on-orphaned-command
                               c-or-e lastmessage heading package-file builtin-file t))
                        ;; This is so catch only returns non-nil in the case of a throw
                        nil))))))))
@@ -1177,22 +1165,22 @@ The name and letter are queried for, and by default are both the latex macro und
   ;; Some of this should probably be factored out too.
   (interactive)
   (unless c-or-e
-    (setq c-or-e (read-from-minibuffer "Name of command or environment to handle? \\" (cmdlist-latex-cmd-under-point)))
+    (setq c-or-e (read-from-minibuffer "Name of command or environment to handle? \\" (cmdlist--latex-cmd-under-point)))
   (unless heading (setq heading cmdlist-package-heading))
   (unless package-file (setq package-file cmdlist-package-file))
   (unless builtin-file (setq builtin-file cmdlist-builtin-file))
-  (let ((exceptions (cmdlist-buffer-provided-cmds package-file builtin-file)))
+  (let ((exceptions (cmdlist--buffer-provided-cmds package-file builtin-file)))
     (if (member c-or-e exceptions)
         ;; Nothing to do
         (message "%s" (concat "`" c-or-e "' already defined or provided"))
       ;; Find a matching package
-      (let ((pkgmatch (cmdlist-singleton-or-prompt
-                       (cmdlist-match-in-package-file c-or-e t package-file)
+      (let ((pkgmatch (cmdlist--singleton-or-prompt
+                       (cmdlist--match-in-package-file c-or-e t package-file)
                        (concat "\n Multiple packages provide `" c-or-e "'. Choose one: "))))
         ;; If we found one, add it
         (if pkgmatch
-            (cmdlist-stick-at-top heading pkgmatch)
-          (message "%s" (cmdlist-act-on-orphaned-command
+            (cmdlist--stick-at-top heading pkgmatch)
+          (message "%s" (cmdlist--act-on-orphaned-command
                          c-or-e nil heading package-file builtin-file nil))))))))
 
 (provide 'cmdlist)
