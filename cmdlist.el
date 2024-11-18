@@ -196,13 +196,16 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 (defun cmdlist--forward-brexp ()
   "Move forward across one matching curly bracket expression."
   (interactive)
-  (when (search-forward "{" nil nil)
-    (let ((count 1))
-      (while (> count 0)
-        (re-search-forward "[{}]")
-        (unless (eq (char-before (- (point) 1)) ?\\)
-          (setq count (+ count
-                         (if (eq (char-before) ?\{) 1 -1))))))))
+  (let ((started nil))
+    (while (and (search-forward "{" nil nil)
+                (if (eq (char-before (1- (point))) ?\\) t (setq started t) nil)))
+    (when started
+      (let ((count 1))
+        (while (> count 0)
+          (re-search-forward "[{}]")
+          (unless (eq (char-before (1- (point))) ?\\)
+            (setq count (+ count
+                           (if (eq (char-before) ?\{) 1 -1)))))))))
 
 (defmacro cmdlist--save-everything (&rest body)
   "Save mark-and-excursion, restriction, and match-data."
@@ -224,20 +227,34 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 ;;;;;;;;;;;;;;;;;;;;;;
 
 (defun cmdlist--shloop-latex-arg ()
-  "Move past the latex argument (bracket expression, command name, or single character) starting under point, and return it"
+  "Move past the latex argument (bracket expression, command name consisting of characters `[A-Za-z@]', or (possibly escaped) single character) starting after point, and return it."
   ;; Move past any spaces and comments
   (while
       (cond ((eq (char-after) ? ) (forward-char) t))
     (cond ((eq (char-after) ?%) (forward-line) t)))
   (let ((start (point)))
-    (cond
-     ((eq (char-after) ?\{) (cmdlist--forward-brexp))
-     ((eq (char-after) ?\\)
+    (pcase (char-after)
+     (?\{ (cmdlist--forward-brexp))
+     (?\\
       (forward-char)
-      (re-search-forward "[^A-Za-z@]")
-      (backward-char))
-     ((forward-char)))
+      (if (string-match-p "[A-Za-z@]" (string (char-after)))
+          (re-search-forward "[A-Za-z@]+")
+        (forward-char)))
+     (_ (forward-char)))
     (buffer-substring-no-properties start (point))))
+
+(defun cmdlist--shloop-optional-latex-arg ()
+  "Move past the optional latex argument starting after point, and return it (not including the square brackets). This assumes the char after point is `['. The end of the optional argument is by definition the first unescaped closing square bracket which is not inside of an (unescaped) curly brace expression."
+  (forward-char)
+  (let ((start (point)))
+    (while (not (eq (char-after) ?\]))
+      (pcase (char-after)
+       (?\{ (cmdlist--forward-brexp))
+       (?\\
+        (forward-char 2))
+       (_ (forward-char))))
+    (forward-char)
+    (buffer-substring-no-properties start (1- (point)))))
 
 (defun cmdlist--latex-cmd-under-point ()
   "If point is on a latex command, return its name, else nil"
@@ -250,37 +267,35 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
           (when (<= start (point))
             (substring cmd 1)))))))
 
-(defun cmdlist--search-backward-incl (string)
-  "Goto beginning of first instance STRING occurring before or around point. Return nil if STRING was not found."
-  (let ((len (length string))
-        (start))
-    (cmdlist--save-everything
-      (forward-char)
-      (search-backward (substring string 0 1) nil t)
-      (when (or (and (<= (+ (point) len) (point-max))
-                     (equal string (buffer-substring-no-properties (point) (+ (point) len))))
-                (search-backward string nil t))
-        (setq start (point))))
-    (when start
-      (goto-char start))))
-
-(defun cmdlist--re-search-backward-incl (regex)
-  "Goto beginning of first instance REGEX occurring before or around point. Return nil if STRING was not found."
-  (let ((start (point))
-        (place))
-    (cmdlist--save-everything
-      (if (re-search-backward regex nil t)
-          (progn (setq place (match-beginning 0))
+(defun cmdlist--search-backward-incl (string &optional as-regex)
+  "Goto beginning of first instance of STRING occurring before or around point. Return nil if STRING was not found. If AS-REGEX is non-nill, treat STRING as a regex."
+  (let ((backward-fun (if as-regex #'re-search-backward #'search-backward))
+        (forward-fun (if as-regex #'re-search-forward #'search-forward))
+        (start (point))
+        (place)
+        (mdata))
+    (save-mark-and-excursion
+      (if (funcall backward-fun string nil t)
+          (progn (setq mdata (match-data))
+                 (setq place (match-beginning 0))
                  (forward-char))
         (goto-char (point-min)))
-      (when (and (re-search-forward regex nil t)
-                 (<= (match-beginning 0) start))
-        (setq place (match-beginning 0))))
+      (while (and (funcall forward-fun string nil t)
+                  (<= (match-beginning 0) start))
+        (setq mdata (match-data))
+        (setq place (match-beginning 0))
+        (goto-char place)
+        (forward-char)))
     (when place
+      (set-match-data mdata)
       (goto-char place))))
 
+(defun cmdlist--re-search-backward-incl (regex)
+  "Goto beginning of first instance of REGEX occurring before or around point. Return nil if STRING was not found."
+  (cmdlist--search-backward-incl regex t))
+
 (defun cmdlist--surrounding-newcmd (&optional regex)
-  "If point is not inside of a latex `\\\(re\)newcommand' (or given REGEX, e.g., `\\newtheorem'), return nil. Otherwise, return the text of the whole command."
+  "If point is not inside of a latex `\\\(re\)newcommand' (or given REGEX, e.g., `\\newtheorem'), return nil. Otherwise, return the text of the whole command. If the command definition is immediately followed by whitespace and then a comment, include that as well. This function will fail on nested command definitions."
   (unless regex (setq regex "\\\\\\(new\\|renew\\|provide\\)command"))
   (let ((start (point))
         (beg))
@@ -288,11 +303,14 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
       (when (cmdlist--re-search-backward-incl regex)
         (setq beg (point))
         (search-forward-regexp regex)
-        (when (eq (char-after) ?\{)
-          (cmdlist--forward-brexp))
-        (cmdlist--forward-brexp)
+        (cmdlist--shloop-latex-arg)
+        (dotimes (_ 2)
+          (when (eq (char-after) ?\[)
+            (cmdlist--shloop-optional-latex-arg)))
+        (cmdlist--shloop-latex-arg)
         (when (>= (point) start)
-          (end-of-line)
+          (when (string-match-p "^ *%" (buffer-substring (point) (line-end-position)))
+            (end-of-line))
           (buffer-substring-no-properties beg (point)))))))
 
 (defun cmdlist--scan-for-latex-cmds (&optional ignore-newcmds)
@@ -343,11 +361,11 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
       (car (split-string (cmdlist--shloop-latex-arg) nil nil "[{}]*\\\\?")))))
 
 (defun cmdlist--scan-for-newcmds ()
-  "Return a list of all \\newcommmands in the current buffer"
+  "Return a list of all \\newcommands in the current buffer"
   (let ((res))
     (cmdlist--save-everything
       (goto-char (point-min))
-      (while (re-search-forward "\\\\\\(new\\|renew\\|provide\\)command" nil t)
+      (while (re-search-forward "\\\\\\(new\\|renew\\|provide\\)command[^a-z]" nil t)
         (push (cmdlist--surrounding-newcmd) res)
         (cmdlist--forward-brexp)))
     (reverse res)))
