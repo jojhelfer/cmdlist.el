@@ -264,7 +264,8 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
         (forward-char))
       (when (search-backward "\\" nil t)
         (let ((cmd (cmdlist--shloop-latex-arg)))
-          (when (<= start (point))
+          (when (and (<= start (point))
+                     (string-match-p "[a-ZA-Z@]" (substring cmd 1 2)))
             (substring cmd 1)))))))
 
 (defun cmdlist--search-backward-incl (string &optional as-regex)
