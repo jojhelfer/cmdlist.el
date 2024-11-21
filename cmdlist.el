@@ -137,6 +137,12 @@
 (defvar cmdlist-test-minimal-file "/tmp/minimal.tex"
   "Path of file created by `cmdlist-test-command-in-minimal-file' (which is called during `cmdlist-package-update-latex-buffer' when you come across an unrecognized command and select \"test it in a minimal LaTeX file\").")
 
+;;;;;;;;;;;;;;;
+;; Constants ;;
+;;;;;;;;;;;;;;;
+(defconst cmdlist--newcmd-regex "\\\\\\(new\\|renew\\|provide\\)command")
+(defconst cmdlist--newthm-regex "\\\\newtheorem\\*?")
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; General utility functions ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -297,7 +303,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 
 (defun cmdlist--surrounding-newcmd (&optional regex)
   "If point is not inside of a latex `\\\(re\)newcommand' (or given REGEX, e.g., `\\newtheorem'), return nil. Otherwise, return the text of the whole command. If the command definition is immediately followed by whitespace and then a comment, include that as well. This function will fail on nested command definitions."
-  (unless regex (setq regex "\\\\\\(new\\|renew\\|provide\\)command"))
+  (unless regex (setq regex cmdlist--newcmd-regex))
   (let ((start (point))
         (beg))
     (cmdlist--save-everything
@@ -305,10 +311,13 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
         (setq beg (point))
         (search-forward-regexp regex)
         (cmdlist--shloop-latex-arg)
-        (dotimes (_ 2)
-          (when (eq (char-after) ?\[)
-            (cmdlist--shloop-optional-latex-arg)))
+        ;; Allow any number of optional arguments
+        (while (eq (char-after) ?\[)
+          (cmdlist--shloop-optional-latex-arg))
         (cmdlist--shloop-latex-arg)
+        ;; Ditto
+        (while (eq (char-after) ?\[)
+          (cmdlist--shloop-optional-latex-arg))
         (when (>= (point) start)
           (when (string-match-p "^ *%" (buffer-substring (point) (line-end-position)))
             (end-of-line))
@@ -320,9 +329,9 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
     (cmdlist--save-everything
       (when ignore-newcmds
         (goto-char (point-max))
-        (if (not (search-backward "\\newcommand" nil t))
+        (if (not (re-search-backward cmdlist--newcmd-regex nil t))
             (setq ignore-newcmds nil)
-          (forward-char 11)
+          (goto-char (match-end 0))
           (when (eq (char-after) ?\{)
             (cmdlist--forward-brexp))
           (cmdlist--forward-brexp)
@@ -354,29 +363,36 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 
 (defun cmdlist--newcmd-name (cmd &optional regex)
   "Return the name of the given `\\\(re\)newcommmand' (or given REGEX, e.g., `\\newtheorem')."
+  (unless regex (setq regex cmdlist--newcmd-regex))
   (cmdlist--save-everything
     (with-temp-buffer
       (insert cmd)
       (goto-char (point-min))
-      (re-search-forward (or regex "\\\\\\(new\\|renew\\|provide\\)command"))
+      (re-search-forward (concat regex "[^*@a-zA-Z]"))
+      ;; Take back the "look-ahead" in the regex
+      (backward-char)
       (car (split-string (cmdlist--shloop-latex-arg) nil nil "[{}]*\\\\?")))))
 
-(defun cmdlist--scan-for-newcmds ()
-  "Return a list of all \\newcommands in the current buffer"
+(defun cmdlist--scan-for-newcmds (&optional regex)
+  "Return a list of all \\newcommands (or given REGEX, e.g., `\\newtheorem') in the current buffer"
+  (unless regex (setq regex cmdlist--newcmd-regex))
   (let ((res))
     (cmdlist--save-everything
       (goto-char (point-min))
-      (while (re-search-forward "\\\\\\(new\\|renew\\|provide\\)command[^a-z]" nil t)
-        (push (cmdlist--surrounding-newcmd) res)
+      (while (re-search-forward (concat regex "[^*@a-zA-Z]") nil t)
+        ;; Take back the "look-ahead" in the regex
+        (backward-char)
+        (push (cmdlist--surrounding-newcmd regex) res)
         (cmdlist--forward-brexp)))
     (reverse res)))
 
-(defun cmdlist--scan-file-for-newcmds (file)
-  "Return a list of all \\newcommmands in the given file"
+(defun cmdlist--scan-file-for-newcmds (file &optional regex)
+  "Return a list of all \\newcommmands (or given REGEX, e.g., `\\newtheorem') in the given file"
+  (unless regex (setq regex cmdlist--newcmd-regex))
   (save-mark-and-excursion
     (with-temp-buffer
       (insert-file-contents file)
-      (cmdlist--scan-for-newcmds))))
+      (cmdlist--scan-for-newcmds regex))))
 
 (defun cmdlist--assemble-newcmd (name defn &optional numargs opt)
   "Return the `\\newcommand' defining NAME with definition DEFN. If NUMARGS or OPT are provided, they are the number of arguments and the default optional argument, respectively."
@@ -441,17 +457,10 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
   (let ((choices))
     (dolist (name names)
       (unless (member name exceptions)
-        (let ((cmds (cmdlist--get-cmdlist-matches cmdlist name))
-              (cmd))
-          (if (> (length cmds) 1)
-              (let ((prompt ""))
-                (setq prompt (cmdlist--list-of-things cmds))
-                (setq prompt (concat prompt "\nMultiple entries for " name ". Choose from above: "))
-                (setq cmd (nth
-                           (- (cmdlist--prompt-for-number prompt 1 (length cmds)) 1)
-                           cmds)))
-            (when cmds
-              (setq cmd (nth 0 cmds))))
+        (let* ((cmds (cmdlist--get-cmdlist-matches cmdlist name))
+              (cmd (cmdlist--singleton-or-prompt
+                    cmds
+                    (concat "Multiple entries for " name ". Choose from above: "))))
           (when cmd
             (push cmd choices)))))
     choices))
@@ -669,7 +678,7 @@ The name and letter are queried for, and by default are both the latex macro und
   (let ((name (read-from-minibuffer "Package name? ")))
     (cmdlist--stick-at-top "% Packages" (concat "\\usepackage{" name "}"))))
 
-(defun cmdlist-get-unused-newcmds (&optional whole-buffer)
+(defun cmdlist-get-unused-newcmds (&optional whole-buffer regex)
   "Return a list of `\\newcommand's in this buffer which are (apparently) not being used. If whole-buffer is nil, restrict to the commands under `cmdlist-heading'."
   (let* ((cmds (cmdlist--scan-for-latex-cmds t))
          (newcmds
@@ -772,7 +781,7 @@ The name and letter are queried for, and by default are both the latex macro und
     (reverse (delete-dups envs))))
 
 (defun cmdlist--stick-thm-at-top (text &optional style shared-counter parent-counter)
-  "Run cmdlist--stick-at-top with TEXT and with heading set to `\theoremstyle{STYLE}' (by default, STYLE is read from a comment at the end of text, which is removed, and is otherwise `plain'), and with no sorting. If SHARED-COUNTER is provided, add it as an optional argument after the first argument. Otherwise, if PARENT-COUNTER is provided, add it as an optional argument after the second argument. Otherwise, if `cmdlist-default-shared-counter' is non-nil, use that as SHARED-COUNTER. Otherwise, if `cmdlist-default-parent-counter' is non-nil, use that as PARENT-COUNTER."
+  "Run cmdlist--stick-at-top with TEXT and with heading set to `\\theoremstyle{STYLE}' (by default, STYLE is read from a comment at the end of text, which is removed, and is otherwise `plain'), and with no sorting. If SHARED-COUNTER is provided, add it as an optional argument after the first argument. Otherwise, if PARENT-COUNTER is provided, add it as an optional argument after the second argument. Otherwise, if `cmdlist-default-shared-counter' is non-nil, use that as SHARED-COUNTER. Otherwise, if `cmdlist-default-parent-counter' is non-nil, use that as PARENT-COUNTER."
   (unless (or shared-counter parent-counter)
     (setq shared-counter cmdlist-default-shared-counter)
     (setq parent-counter cmdlist-default-parent-counter))
@@ -801,33 +810,14 @@ The name and letter are queried for, and by default are both the latex macro und
     (setq text (buffer-substring-no-properties (point-min) (point-max))))
   (cmdlist--stick-at-top (concat "\\theoremstyle{" style "}") text))
 
-(defun cmdlist--scan-for-newthms ()
-  "Return a list of all `\\newtheorem's in the current buffer"
-  ;; This is adapted from cmdlist--scan-for-newcmds. Perhaps something should be factored out?
-  (let ((res))
-    (cmdlist--save-everything
-      (goto-char (point-min))
-      (while (re-search-forward "\\\\newtheorem[^a-z]" nil t)
-        (push (cmdlist--surrounding-newcmd "\\\\newtheorem\\*?") res)
-        (cmdlist--forward-brexp)))
-    (reverse res)))
-
 (defun cmdlist--get-unused-newthms ()
   "Return a list of `\\newtheorem's in this buffer which are (apparently) not being used."
-  ;; This is adapted from `cmdlist-get-unused-newcmds'. Perhaps something should be factored out?
+  ;; This was originally adapted from `cmdlist-get-unused-newcmds' but now seems different enough that there isn't anything obvious to factor out.
   (let* ((envs (append (cmdlist--scan-for-latex-envs) (cmdlist--get-newtheorem-dependencies)))
-         (newthms (cmdlist--scan-for-newthms))
+         (newthms (cmdlist--scan-for-newcmds cmdlist--newthm-regex))
          (unuseds (cmdlist--dofilter (x newthms)
                     (not (member (cmdlist--newcmd-name x "\\newtheorem\\*?") envs)))))
     unuseds))
-
-(defun cmdlist--scan-file-for-newthms (file)
-  "Return a list of all `\\newtheorem's in the given file"
-  ;; This is adapted from `cmdlist--scan-file-for-newcmds'. Perhaps something should be factored out?
-  (save-mark-and-excursion
-    (with-temp-buffer
-      (insert-file-contents file)
-      (cmdlist--scan-for-newthms))))
 
 (defun cmdlist--get-newtheorem-dependencies ()
   "Get all the commands included in square brackets in newtheorem commands."
@@ -840,16 +830,16 @@ The name and letter are queried for, and by default are both the latex macro und
 
 (defun cmdlist-newthm-update-latex-buffer (&optional file)
   "Add to current buffer all ``\\newtheorem's defined in FILE (using `cmdlist--stick-thm-at-top') which are present in the current file and not already defined. By default FILE is `cmdlist-theorem-file'."
-  ;; This is adapted from `cmdlist-update-latex-buffer'. Perhaps something should be factored out?
+  ;; This was originally adapted from `cmdlist-update-latex-buffer' but now seems different enough that there isn't anything obvious to factor out.
   (interactive)
   (unless file (setq file cmdlist-theorem-file))
-  (let* ((thmlist (cmdlist--scan-file-for-newthms file))
+  (let* ((thmlist (cmdlist--scan-file-for-newcmds file cmdlist--newthm-regex))
          (envs (append (cmdlist--scan-for-latex-envs) (cmdlist--get-newtheorem-dependencies)))
-         (exceptions (mapcar #'(lambda (x) (cmdlist--newcmd-name x "\\newtheorem\\*?")) (cmdlist--scan-for-newthms)))
+         (exceptions (mapcar #'(lambda (x) (cmdlist--newcmd-name x cmdlist--newthm-regex)) (cmdlist--scan-for-newcmds cmdlist--newthm-regex)))
          (newthms
           (cmdlist--dofilter (thm thmlist)
-            (and (member (cmdlist--newcmd-name thm "\\newtheorem\\*?") envs)
-                 (not (member (cmdlist--newcmd-name thm "\\newtheorem\\*?") exceptions))))))
+            (and (member (cmdlist--newcmd-name thm cmdlist--newthm-regex) envs)
+                 (not (member (cmdlist--newcmd-name thm cmdlist--newthm-regex) exceptions))))))
     (if newthms
         (progn
           (dolist (thm newthms)
@@ -961,15 +951,13 @@ The name and letter are queried for, and by default are both the latex macro und
 
 (defun cmdlist--singleton-or-prompt (l prompt)
   "L should be a list of strings. If L is a singleton, return it, otherwise prompt with PROMPT for an element to choose. If L is empty, return nil."
-  ;; Adapted from `cmdlist--select-cmds-from-cmdlist'. Something should probably be factored out.
   (when l
     (if (= (length l) 1)
         (car l)
       (setq prompt (concat (cmdlist--list-of-things l) "\n" prompt))
-      (let ((choice (nth
-                     (- (cmdlist--prompt-for-number prompt 1 (length l)) 1)
-                     l)))
-        choice))))
+      (nth
+       (- (cmdlist--prompt-for-number prompt 1 (length l)) 1)
+       l))))
 
 (defun cmdlist--choose-and-add-package-or-class (cmd &optional package-file class pkgchoice)
   "Prompt for a package (or if CLASS, document class) from PACKAGE-FILE (default `cmdlist-package-file') and add cmd to it. Create a new package or class if necessary. Then sort the package file. Return a newline-terminated message explaining what happened. If PKGCHOICE is non-nil, use that as chosen package or document class instead of prompting."
@@ -1083,10 +1071,10 @@ The name and letter are queried for, and by default are both the latex macro und
 
 (defun cmdlist--scan-for-other-defined-cmds ()
   "Return a list of all commands defined in the current buffer using commands in `cmdlist-cmd-defining-cmds'."
-  ;; This is adapted from cmdlist--scan-for-newcmds. Perhaps something should be factored out?
+  ;; This was originally adapted from `cmdlist--scan-for-newcmds' but now seems different enough that there isn't anything obvious to factor out.
   (let* ((res)
          (cmds (mapcar (lambda (x) (if (stringp x) x (car x))) cmdlist-cmd-defining-cmds))
-         (regx (concat "\\\\\\(" (mapconcat 'regexp-quote cmds "\\|") "\\)[^a-z]")))
+         (regx (concat "\\\\\\(" (mapconcat 'regexp-quote cmds "\\|") "\\)[^*@a-zA-Z]")))
     (cmdlist--save-everything
       (goto-char (point-min))
       (while (re-search-forward regx nil t)
@@ -1115,7 +1103,7 @@ The name and letter are queried for, and by default are both the latex macro und
   (append (cmdlist--read-lines builtin-file)
           ;; TODO: This is wasteful. These should be combined into a single command.
           (mapcar 'cmdlist--newcmd-name (cmdlist--scan-for-newcmds))
-          (mapcar #'(lambda (x) (cmdlist--newcmd-name x "\\newtheorem\\*?")) (cmdlist--scan-for-newthms))
+          (mapcar #'(lambda (x) (cmdlist--newcmd-name x cmdlist--newthm-regex)) (cmdlist--scan-for-newcmds cmdlist--newthm-regex))
           (cmdlist--scan-for-other-defined-cmds)
           (cmdlist--scan-for-defined-envs)
           (when (file-exists-p package-file)
