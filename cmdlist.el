@@ -137,11 +137,13 @@
 (defvar cmdlist-test-minimal-file "/tmp/minimal.tex"
   "Path of file created by `cmdlist-test-command-in-minimal-file' (which is called during `cmdlist-package-update-latex-buffer' when you come across an unrecognized command and select \"test it in a minimal LaTeX file\").")
 
-;;;;;;;;;;;;;;;
-;; Constants ;;
-;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Constants and internal variables ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defconst cmdlist--newcmd-regex "\\\\\\(new\\|renew\\|provide\\)command")
 (defconst cmdlist--newthm-regex "\\\\newtheorem\\*?")
+(defvar-local cmdlist--local-ignored-cmds ()
+    "List of commands that `cmdlist-package-update-latex-buffer' should not ask about even if they are not currently defined in the current file or provided by a package. If equal to `t' (instead of a list), ignore *all* commands.")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; General utility functions ;;
@@ -471,18 +473,19 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
          (matches (cmdlist--get-cmdlist-matches cmdlist name))
          (many (< 1(length matches))))
     (if (not matches) t
-      (cl-case (car (read-multiple-choice
-                  (concat "\"" name "\" already defined. Previous definition"
-                          (when many "s")
-                          ":\n"
-                          (cmdlist--list-of-things matches "  ")
-                          "\n\nWhat would you like to do?")
-                  `((?q "quit")
-                    (?r ,(concat "replace " (when many "an ") "existing definition"))
-                    (?a "add a new definition"))))
-        (?q nil)
-        (?a t)
-        (?r (cmdlist--singleton-or-prompt matches "Which definition to replace? "))))))
+      (let ((choice (car (read-multiple-choice
+                          (concat "\"" name "\" already defined. Previous definition"
+                                  (when many "s")
+                                  ":\n"
+                                  (cmdlist--list-of-things matches "  ")
+                                  "\n\nWhat would you like to do?")
+                          `((?q "quit")
+                            (?r ,(concat "replace " (when many "an ") "existing definition"))
+                            (?a "add a new definition"))))))
+        (pcase choice
+          (?q nil)
+          (?a t)
+          (?r (cmdlist--singleton-or-prompt matches "Which definition to replace? ")))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Modifying buffer and adding new commands ;;
@@ -997,9 +1000,6 @@ The name and letter are queried for, and by default are both the latex macro und
       (cmdlist--package-and-class-sort))
     (concat "`" cmd "' added to package `" pkg "'\n")))
 
-(defun cmdlist--local-cmds-filename ()
-  (concat "/tmp/" (replace-regexp-in-string "/" ":" (buffer-file-name)) ".tmp.commands"))
-
 (defun cmdlist-test-command-in-minimal-file (&optional name)
   "Create and visit the file `cmdlist-test-minimal-file', and populate it with a minimal LaTeX file including the command which is prompted for (and defaults to the LaTeX command under point), so that you can test whether it is a built in command (or try to figure out what packages/document classes provide it."
   (interactive)
@@ -1015,13 +1015,12 @@ The name and letter are queried for, and by default are both the latex macro und
    "\\end{document}\n"))
 
 (defun cmdlist--act-on-orphaned-command (c-or-e &optional prompt heading package-file builtin-file allow-edit-here)
-  "Give the option of assign the given command or environment name to a package, or to add it to the list of builtin commands. Return a newline-terminated message saying what happened. If ALLOW-EDIT-HERE is non-nil, offer option to edit buffer at current position or to run `cmdlist-test-command-in-minimal-file'. In either case, `throw' the symbol `edit-here' with a cons pair, in which the second element is the current point, and the first element is the symbol `edit' or `c-or-e', respectively."
+  "Give the option of assigning the given command or environment name to a package, or to add it to the list of builtin commands. Return a newline-terminated message saying what happened. If ALLOW-EDIT-HERE is non-nil, offer option to edit buffer at current position or to run `cmdlist-test-command-in-minimal-file'. In either case, `throw' the symbol `edit-here' with a cons pair, in which the second element is the current point, and the first element is the symbol `edit' or `c-or-e', respectively."
   (unless prompt (setq prompt ""))
   (unless heading (setq heading cmdlist-package-heading))
   (unless package-file (setq package-file cmdlist-package-file))
   (unless builtin-file (setq builtin-file cmdlist-builtin-file))
   ;; Prompt to add new builtin or add to a package
-  ;; TODO: this should perhaps use read-multiple-choice; alternatively, cmdlist--replace-prompt should use something more like this
   (let ((decision
          (read-char (concat (propertize prompt 'face 'shadow)
                             (when (> (length prompt) 0)
@@ -1032,32 +1031,25 @@ The name and letter are queried for, and by default are both the latex macro und
                             "(d) assign to current documentclass\n"
                             "(D) assign a documentclass to it\n"
                             "(b) add it as a builtin\n"
-                            "(i) ignore it in this file for the rest of this session\n"
+                            "(i) ignore it and don't ask again in this buffer\n"
+                            "(I) ignore it and don't ask again about any missing commands in this buffer\n"
                             (when allow-edit-here "(t) test it in a minimal LaTeX file\n")
                             (when allow-edit-here "(e) edit the buffer here\n")
-                            "(↵) do nothing"))))
-    (cond
-     ((and allow-edit-here (eq decision ?e))
-      (throw 'edit-here (cons 'edit (point))))
-     ((and allow-edit-here (eq decision ?t))
-      (throw 'edit-here (cons c-or-e (point))))
-     ((eq decision ?p)
-      (cmdlist--choose-and-add-package-or-class c-or-e package-file nil))
-     ((eq decision ?D)
-      (cmdlist--choose-and-add-package-or-class c-or-e package-file t))
-     ((eq decision ?d)
+                            "(↵) (or any other key) do nothing"))))
+    (pcase decision
+     (?e (when allow-edit-here (throw 'edit-here (cons 'edit (point)))))
+     (?t (when allow-edit-here (throw 'edit-here (cons c-or-e (point)))))
+     (?p (cmdlist--choose-and-add-package-or-class c-or-e package-file nil))
+     (?D (cmdlist--choose-and-add-package-or-class c-or-e package-file t))
+     (?d
       (cmdlist--choose-and-add-package-or-class c-or-e package-file t
                                                (car (cmdlist--get-document-class))))
-     ((eq decision ?i)
-          (let ((fname (cmdlist--local-cmds-filename)))
-            (with-temp-file fname
-              (when (file-exists-p fname)
-                (insert-file fname))
-              ;; In case the file is not newline-terminated as it should be
-              (unless (or (eq (point) (point-min)) (eq (char-before) ?\n)) (insert "\n"))
-              (insert c-or-e "\n")))
-          (concat "`" c-or-e "' marked temporarily as a file-local command\n"))
-      ((eq decision ?b)
+     (?i
+      (push c-or-e cmdlist--local-ignored-cmds)
+      (concat "`" c-or-e "' marked temporarily as a file-local command\n"))
+     (?I
+      (setq cmdlist--local-ignored-cmds t))
+     (?b
        (with-temp-file builtin-file
          (when (file-exists-p builtin-file)
            (insert-file-contents builtin-file))
@@ -1108,12 +1100,12 @@ The name and letter are queried for, and by default are both the latex macro und
           (cmdlist--scan-for-defined-envs)
           (when (file-exists-p package-file)
             (cmdlist--scan-package-file (append (cmdlist--scan-for-packages) (cmdlist--get-document-class)) t package-file))
-          (cmdlist--read-lines (cmdlist--local-cmds-filename))))
+          (let ((l cmdlist--local-ignored-cmds)) (when (listp l) l))))
 
 (defun cmdlist-package-update-latex-buffer (&optional heading package-file builtin-file)
   "Add to current buffer all ``\\usepackage's defined in PACKAGE-FILE (default is `cmdlist-package-file') under HEADING (default is `cmdlist-package-heading') which provide commands or environments present in the current file and not built-in (according to BUITLIN-FILE, default `cmdlist-builtin-file') or already defined. Prompt to act on any unmatched commands or enviornments."
   (interactive)
-  ;; This is adapted from `cmdlist-update-latex-buffer'. Perhaps something should be factored out?
+  ;; This was originally adapted from `cmdlist-update-latex-buffer' but now seems different enough that there isn't anything obvious to factor out.
   (unless heading (setq heading cmdlist-package-heading))
   (unless package-file (setq package-file cmdlist-package-file))
   (unless builtin-file (setq builtin-file cmdlist-builtin-file))
@@ -1149,19 +1141,21 @@ The name and letter are queried for, and by default are both the latex macro und
                          (setq exceptions (cl-remove-duplicates (seq-sort 'string< exceptions)))
                          (setq curex ""))
                      ;; Otherwise, act on it
-                     (cmdlist--save-everything
-                       ;; Display the command in question in the buffer
-                       (goto-char (point-min))
-                       (let ((case-fold-search nil))
-                         (re-search-forward (concat "\\\\\\(begin{\\)?{?"
-                                                    (regexp-quote c-or-e)
-                                                    "\\($\\|[^a-zA-Z]\\)"))
-                         (goto-char (match-beginning 0)))
-                       (setq lastmessage
-                             (cmdlist--act-on-orphaned-command
-                              c-or-e lastmessage heading package-file builtin-file t))
-                       ;; This is so catch only returns non-nil in the case of a throw
-                       nil))))))))
+                     ;; (unless we are ignoring all missing commands)
+                     (unless cmdlist--local-ignored-cmds
+                       (cmdlist--save-everything
+                         ;; Display the command in question in the buffer
+                         (goto-char (point-min))
+                         (let ((case-fold-search nil))
+                           (re-search-forward (concat "\\\\\\(begin{\\)?{?"
+                                                      (regexp-quote c-or-e)
+                                                      "\\($\\|[^a-zA-Z]\\)"))
+                           (goto-char (match-beginning 0)))
+                         (setq lastmessage
+                               (cmdlist--act-on-orphaned-command
+                                c-or-e lastmessage heading package-file builtin-file t))
+                         ;; This is so catch only returns non-nil in the case of a throw
+                         nil)))))))))
       (when edit-point
         (push-mark)
         (when (member 'evil features)
