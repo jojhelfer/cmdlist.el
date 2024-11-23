@@ -104,7 +104,7 @@
 (defvar cmdlist-default-shared-counter "defn"
   "Default shared counter for `newtheorem's.")
 
-(defvar cmdlist-default-parent-counter nil
+(defvar cmdlist-default-parent-counter "section"
   "Default parent counter for `newtheorem's (if `cmdlist-default-shared-counter' is `nil').")
 
 (defvar cmdlist-package-file (file-name-concat cmdlist-base-directory "latex-packages.sty")
@@ -140,8 +140,10 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Constants and internal variables ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defconst cmdlist--newcmd-regex "\\\\\\(new\\|renew\\|provide\\)command")
-(defconst cmdlist--newthm-regex "\\\\newtheorem\\*?")
+(defconst cmdlist--newcmd-regex "\\\\\\(new\\|renew\\|provide\\)command"
+  "Regex matching the basic command-defining commands (including the initial backslash) -- these are the only ones that are permitted in `cmdlist-files'.")
+(defconst cmdlist--newthm-regex "\\\\newtheorem\\*?"
+  "Regex matching the theorem-defining commands (including the initial backslash) -- these are the ones that are permitted in `cmdlist-theorem-file'.")
 (defvar-local cmdlist--local-ignored-cmds ()
     "List of commands that `cmdlist-package-update-latex-buffer' should not ask about even if they are not currently defined in the current file or provided by a package. If equal to `t' (instead of a list), ignore *all* commands.")
 
@@ -149,46 +151,13 @@
 ;; General utility functions ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defmacro cmdlist--dofilter (varbind &rest body)
-  "Binds VAR to each element of LIST and performs BODY, returning the list of those elements for which result of BODY is non-nil.
-
-\(fn (VAR LIST) BODY...)"
-  (declare (indent 1))
-  (let ((res (make-symbol "")))
-    `(let ((,res))
-       (dolist ,varbind
-         (if (progn ,@body)
-             (push ,(nth 0 varbind) ,res)))
-       (reverse ,res))))
-
-(defun cmdlist--zip1 (&rest args)
-  "If ARGS are all non-empty lists, return (HEADS . TAILS), where HEADS is a list of the first elements, and TAILS is a list of the ends, otherwise return nil."
-  (let ((heads) (tails)
-        (good t))
-    (dolist (x args)
-      (if (not (and good x))
-          (setq good nil)
-        (push (car x) heads)
-        (push (cdr x) tails)))
-    (when good
-      (cons (reverse heads) (reverse tails)))))
-
-(defun cmdlist--zip (&rest args)
-  (let ((res)
-        (cur (apply 'cmdlist--zip1 args)))
-    (while cur
-      (push (car cur) res)
-      (setq cur (apply 'cmdlist--zip1 (cdr cur))))
-    (reverse res)))
-
 (defun cmdlist--list-of-things (things &optional fmt)
   "Concatenates the strings in THINGS, separated by newlines with a number at the beginning of each line.
 FMT specifies how the number should be formatted (default \"[%d]\")."
   (unless fmt
       (setq fmt "[%d] "))
-  (let* ((nums (mapcar (lambda (x) (format fmt x)) (number-sequence 1 (length things))))
-         (lines (cmdlist--zip nums things)))
-    (mapconcat (lambda (x) (apply 'concat x)) lines "\n")))
+  (let ((lines (cl-mapcar (lambda (x n) (concat (format fmt n) x)) things (number-sequence 1 (length things)))))
+    (mapconcat 'identity lines "\n")))
 
 (defun cmdlist--prompt-for-number (prompt &optional min max)
   "Keep displaying PROMPT and asking the user for input until the input is an integer (between MIN and MAX, if provided), then return it as an integer."
@@ -447,12 +416,12 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
          (sort-fold-case t))
       (sort-subr reverse 'forward-line
                  (lambda ()
-                   (cmdlist--re-search-backward-incl "\\\\r?e?newcommand")
-                   (re-search-forward "\\\\r?e?newcommand")
+                   (cmdlist--re-search-backward-incl cmdlist--newcmd-regex)
+                   (goto-char (match-end 0))
                    (when (eq (char-after) ?\{) (cmdlist--forward-brexp))
                    (cmdlist--forward-brexp)
                    (end-of-line))
-                 (lambda () (re-search-forward "\\\\r?e?newcommand{?") nil)))))
+                 (lambda () (re-search-forward (concat cmdlist--newcmd-regex "{?")) nil)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Finding commands in a list of \newcommands ;;
@@ -460,14 +429,11 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 
 (defun cmdlist--get-cmdlist-matches (cmdlist name)
   "Return all elements of CMDLIST which are `\\\(re\)newcommand's defining the command NAME."
-  (cmdlist--dofilter (cmd cmdlist)
-    (or
-     (string-prefix-p (concat "\\newcommand{\\" name "}") cmd)
-     (string-prefix-p (concat "\\newcommand\\" name "[") cmd)
-     (string-prefix-p (concat "\\newcommand\\" name "{") cmd)
-     (string-prefix-p (concat "\\renewcommand{\\" name "}") cmd)
-     (string-prefix-p (concat "\\renewcommand\\" name "[") cmd)
-     (string-prefix-p (concat "\\renewcommand\\" name "{") cmd))))
+  (let ((case-fold-search nil))
+    (seq-filter
+     (lambda (cmd)
+       (string-match-p (concat cmdlist--newcmd-regex "\\({\\\\" name "}\\|\\\\" name "\\)[{\\[]") cmd))
+     cmdlist)))
 
 (defun cmdlist--select-cmds-from-cmdlist (cmdlist names exceptions)
   "For each element of NAMES which is not in EXCEPTION, get all elements of CMDLIST which are `\\newcommand's defining this element, and return them in a list. Each time there are multiple matches, the user is queried for a choice."
@@ -475,9 +441,9 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
     (dolist (name names)
       (unless (member name exceptions)
         (let* ((cmds (cmdlist--get-cmdlist-matches cmdlist name))
-              (cmd (cmdlist--singleton-or-prompt
-                    cmds
-                    (concat "Multiple entries for " name ". Choose from above: "))))
+               (cmd (cmdlist--singleton-or-prompt
+                     cmds
+                     (concat "Multiple entries for " name ". Choose from above: "))))
           (when cmd
             (push cmd choices)))))
     choices))
@@ -714,8 +680,9 @@ The name and letter are queried for, and by default are both the latex macro und
                 (search-forward "\n\n")
                 (narrow-to-region st (point))
                 (cmdlist--scan-for-newcmds)))))
-         (unuseds (cmdlist--dofilter (x newcmds)
-                    (not (member (cmdlist--newcmd-name x) cmds)))))
+         (unuseds (seq-filter
+                   (lambda (x) (not (member (cmdlist--newcmd-name x) cmds)))
+                   newcmds)))
     unuseds))
 
 (defun cmdlist-show-unused-newcmds ()
@@ -755,7 +722,7 @@ The name and letter are queried for, and by default are both the latex macro und
         (let ((cmd-pos))
           (cmdlist--save-everything
             (goto-char (point-min))
-            (when (re-search-forward (format "\\\\r?e?newcommand{?\\\\%s[}{\\[]" cmd) nil t)
+            (when (re-search-forward (concat cmdlist--newcmd-regex "{?\\\\" cmd "[}{\\[]" cmd) nil t)
               (setq cmd-pos (point))))
           (when cmd-pos
             (goto-char cmd-pos)))))))
@@ -802,7 +769,7 @@ The name and letter are queried for, and by default are both the latex macro und
     (reverse (delete-dups envs))))
 
 (defun cmdlist--stick-thm-at-top (text &optional style shared-counter parent-counter)
-  "Run cmdlist--stick-at-top with TEXT and with heading set to `\\theoremstyle{STYLE}' (by default, STYLE is read from a comment at the end of text, which is removed, and is otherwise `plain'), and with no sorting. If SHARED-COUNTER is provided, add it as an optional argument after the first argument. Otherwise, if PARENT-COUNTER is provided, add it as an optional argument after the second argument. Otherwise, if `cmdlist-default-shared-counter' is non-nil, use that as SHARED-COUNTER. Otherwise, if `cmdlist-default-parent-counter' is non-nil, use that as PARENT-COUNTER."
+  "Run cmdlist--stick-at-top with TEXT and with heading set to `\\theoremstyle{STYLE}' (by default, STYLE is read from a comment at the end of text, which is removed, and is otherwise `plain'), and with no sorting. If SHARED-COUNTER is non-nil and is different from the theorem being added, add it as an optional argument after the first argument. If SHARED-COUNTER is nil or equal to the theorem being added, if PARENT-COUNTER is provided, add it as an optional argument after the second argument. If both SHARED-COUNTER and PARENT-COUNTER are nil, they are set to `cmdlist-default-shared-counter' and `cmdlist-default-parent-counter', respectively."
   (unless (or shared-counter parent-counter)
     (setq shared-counter cmdlist-default-shared-counter)
     (setq parent-counter cmdlist-default-parent-counter))
@@ -814,17 +781,16 @@ The name and letter are queried for, and by default are both the latex macro und
         (progn (unless style (setq style (match-string-no-properties 1)))
                (replace-match ""))
       (unless style (setq style "plain")))
-    ;; Handle counter
+    ;; If shared-counter or parent-counter is non-nil, remove hard-coded counter
     (goto-char (point-min))
     (when (and (or shared-counter parent-counter)
                (re-search-forward "\\[[^\\]*\\]" nil t))
       (replace-match ""))
     (goto-char (point-min))
-    ;; If shared-counter is the current theorem, don't add it.
-    (unless (and shared-counter (search-forward (concat "{" shared-counter "}") nil t))
+    (let ((shared-is-current (and shared-counter (search-forward (concat "{" shared-counter "}") nil t))))
       (goto-char (point-min))
       (when (search-forward "}")
-        (if shared-counter
+        (if (and shared-counter (not shared-is-current))
             (insert "[" shared-counter "]")
           (when (and parent-counter (search-forward "}"))
             (insert "[" parent-counter "]")))))
@@ -836,21 +802,22 @@ The name and letter are queried for, and by default are both the latex macro und
   ;; This was originally adapted from `cmdlist--get-unused-newcmds' but now seems different enough that there isn't anything obvious to factor out.
   (let* ((envs (append (cmdlist--scan-for-latex-envs) (cmdlist--get-newtheorem-dependencies)))
          (newthms (cmdlist--scan-for-newcmds cmdlist--newthm-regex))
-         (unuseds (cmdlist--dofilter (x newthms)
-                    (not (member (cmdlist--newcmd-name x "\\newtheorem\\*?") envs)))))
+         (unuseds (seq-filter
+                   (lambda (x) (not (member (cmdlist--newcmd-name x cmdlist--newthm-regex) envs)))
+                   newthms)))
     unuseds))
 
 (defun cmdlist--get-newtheorem-dependencies ()
-  "Get all the commands included in square brackets in newtheorem commands."
+  "Get a list of all the optional arguments in newtheorem commands appearing after the first (bracketed) argument."
     (let (res)
       (cmdlist--save-everything
         (goto-char (point-min))
-        (while (re-search-forward "\\\\newtheorem\\*?{[a-zA-Z]*}\\[\\([a-zA-Z]*\\)\\]" nil t)
+        (while (re-search-forward (concat cmdlist--newthm-regex "{[a-zA-Z]*}\\[\\([a-zA-Z]*\\)\\]") nil t)
           (add-to-list 'res (match-string-no-properties 1)))
         res)))
 
 (defun cmdlist-newthm-update-latex-buffer (&optional file)
-  "Add to current buffer all ``\\newtheorem's defined in FILE (using `cmdlist--stick-thm-at-top') which are present in the current file and not already defined. By default FILE is `cmdlist-theorem-file'."
+  "Add to current buffer all ``\\newtheorem's defined in FILE (using `cmdlist--stick-thm-at-top') which are present in the current file and not already defined. By default FILE is `cmdlist-theorem-file'. Return a list of the new theorems added."
   ;; This was originally adapted from `cmdlist-update-latex-buffer' but now seems different enough that there isn't anything obvious to factor out.
   (interactive)
   (when (cmdlist--file-exists-p (or file 'cmdlist-theorem-file))
@@ -859,15 +826,26 @@ The name and letter are queried for, and by default are both the latex macro und
            (envs (append (cmdlist--scan-for-latex-envs) (cmdlist--get-newtheorem-dependencies)))
            (exceptions (mapcar #'(lambda (x) (cmdlist--newcmd-name x cmdlist--newthm-regex)) (cmdlist--scan-for-newcmds cmdlist--newthm-regex)))
            (newthms
-            (cmdlist--dofilter (thm thmlist)
-              (and (member (cmdlist--newcmd-name thm cmdlist--newthm-regex) envs)
-                   (not (member (cmdlist--newcmd-name thm cmdlist--newthm-regex) exceptions))))))
-      (if newthms
-          (progn
-            (dolist (thm newthms)
-              (cmdlist--stick-thm-at-top thm))
-            (message "Added %d new theorem:\n%s" (length newthms) (cmdlist--list-of-things newthms)))
-        (message "No theorems added.")))))
+            (seq-filter
+             (lambda (thm)
+               (let ((thmname (cmdlist--newcmd-name thm cmdlist--newthm-regex)))
+                 (and (member thmname envs)
+                      (not (member thmname exceptions)))))
+             thmlist)))
+      (if (not newthms)
+          (message "No theorems added.")
+        (dolist (thm newthms)
+          (cmdlist--stick-thm-at-top thm))
+        ;; If we have introduced any new dependencies, run it again
+        (when (cl-some
+               (lambda (dep)
+                 (and (member dep thmlist)
+                      (not (member dep envs))
+                      (not (member dep exceptions))))
+               (cmdlist--get-newtheorem-dependencies))
+          (setq newthms (append newthms (cmdlist-newthm-update-latex-buffer))))
+        (message "Added %d new theorem:\n%s" (length newthms) (cmdlist--list-of-things newthms))
+        newthms))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Packages and built-ins ;;
@@ -986,9 +964,10 @@ The name and letter are queried for, and by default are both the latex macro und
   (unless package-file (setq package-file cmdlist-package-file))
   (let* ((definer (if class "\\documentclass" "\\usepackage"))
          (pkg-or-class-list
-          (mapcar #'(lambda (x) (cmdlist--newcmd-name x definer))
-                  (cmdlist--dofilter (x (cmdlist--read-lines package-file))
-                    (string-prefix-p definer x))))
+          (mapcar (lambda (x) (cmdlist--newcmd-name x definer))
+                  (seq-filter
+                   (lambda (x) (string-prefix-p definer x))
+                   (cmdlist--read-lines package-file))))
          (pkg
           (or pkgchoice
               (completing-read
