@@ -63,7 +63,6 @@
 ;; TODO Try to guess command provider by looking through package/class files
 ;; TODO Ignore commands used in comments
 ;; TODO Be careful about commands (and packages) which are the empty string
-;; TODO Check whether ".latex-commands.sty" and so on exist before using them
 ;; TODO Add \usetikzlibrary support
 ;; TODO Add option to (via elisp) allow presence of certain commands to trigger insertion of arbitrary code in preamble
 
@@ -140,6 +139,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Constants and internal variables ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defconst cmdlist--newcmd-regex "\\\\\\(new\\|renew\\|provide\\)command"
   "Regex matching the basic command-defining commands (including the initial backslash) -- these are the only ones that are permitted in `cmdlist-files'.")
 (defconst cmdlist--newthm-regex "\\\\newtheorem\\*?"
@@ -190,6 +190,15 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
   `(save-mark-and-excursion
      (save-restriction
        (save-match-data
+         ,@body))))
+
+(defmacro cmdlist--save-everything-widen (&rest body)
+  "Save mark-and-excursion, restriction, and match-data, and then widen before executing BODY."
+  (declare (indent 0) (debug t))
+  `(save-mark-and-excursion
+     (save-restriction
+       (save-match-data
+         (widen)
          ,@body))))
 
 (defun cmdlist--read-lines (file)
@@ -312,7 +321,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
 (defun cmdlist--scan-for-latex-cmds (&optional ignore-newcmds)
   "Return all names of latex commands in current buffer."
   (let (cmds last-newcmd-pos)
-    (cmdlist--save-everything
+    (cmdlist--save-everything-widen
       (when ignore-newcmds
         (goto-char (point-max))
         (if (not (re-search-backward cmdlist--newcmd-regex nil t))
@@ -363,7 +372,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
   "Return a list of all \\newcommands (or given REGEX, e.g., `\\newtheorem') in the current buffer"
   (unless regex (setq regex cmdlist--newcmd-regex))
   (let ((res))
-    (cmdlist--save-everything
+    (cmdlist--save-everything-widen
       (goto-char (point-min))
       (while (re-search-forward (concat regex "[^*@a-zA-Z]") nil t)
         ;; Take back the "look-ahead" in the regex
@@ -476,8 +485,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
   "Stick TEXT (or each string in TEXT) after the first occurrence of HEADING, then sort it using SORTFUN if non-nil.
 If HEADING does not occur, first insert HEADING before \\begin{document}"
   (let ((starting-point))
-    (cmdlist--save-everything
-      (if (buffer-narrowed-p) (widen))
+    (cmdlist--save-everything-widen
       (goto-char (point-min))
       (unless (search-forward heading nil t)
         (search-forward "\\begin{document}")
@@ -543,7 +551,7 @@ If FILE is given, instead add it to FILE. If FILE is `t', it is set to the first
       (if (not action)
           (message "Operation cancelled")
         (unless (eq t action)
-          (cmdlist--save-everything
+          (cmdlist--save-everything-widen
             (goto-char (point-min))
             (search-forward (concat action "\n"))
             (delete-region (match-beginning 0) (match-end 0))))
@@ -592,6 +600,17 @@ By default HEADING is `cmdlist-heading' and FILES are the files in the variable 
             (cmdlist--stick-at-top heading newcmds 'cmdlist--sort-newcmds)
             (message "Added %d new commands:\n%s" (length newcmds) (cmdlist--list-of-things newcmds)))
         (message "No commands added.")))))
+
+(defun add-headers (headers)
+  "Add each string in the list HEADERS to the top of the document under the `documentclass' line. Each string is inserted preceded by `% ' and separated by a blank line. Do nothing and return `nil' if the document class line is not found, else return `t'."
+  (cmdlist--save-everything-widen
+    (goto-char (point-min))
+    (when (string-match-p "^\\\\documentclass{"
+                          (buffer-substring-no-properties (point) (line-end-position)))
+      (forward-line)
+      (dolist (h headers)
+        (beginning-of-line)
+        (insert "\n% " h "\n")))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Convenience functions ;;
@@ -673,7 +692,7 @@ The name and letter are queried for, and by default are both the latex macro und
          (newcmds
           (if whole-buffer
               (cmdlist--scan-for-newcmds)
-            (cmdlist--save-everything
+            (cmdlist--save-everything-widen
               (goto-char (point-min))
               (search-forward cmdlist-heading)
               (let ((st (point)))
@@ -700,7 +719,7 @@ The name and letter are queried for, and by default are both the latex macro und
     (if unuseds
         (when (y-or-n-p (format "Seemingly unused commands:\n%s\nDelete? " (cmdlist--list-of-things unuseds)))
           (dolist (x unuseds)
-            (cmdlist--save-everything
+            (cmdlist--save-everything-widen
               (goto-char (point-min))
               (let ((case-fold-search nil))
                 (search-forward x))
@@ -733,7 +752,7 @@ The name and letter are queried for, and by default are both the latex macro und
   (let ((has-heading nil)
         (has-thm-heading nil)
         (has-pkg-heading nil))
-    (save-mark-and-excursion
+    (cmdlist--save-everything-widen
       (goto-char (point-min))
       (setq has-heading (re-search-forward (concat "^" cmdlist-heading "$") nil t))
       (goto-char (point-min))
@@ -761,7 +780,7 @@ The name and letter are queried for, and by default are both the latex macro und
 (defun cmdlist--scan-for-latex-envs ()
   "Return all names of latex environments in current buffer."
   (let (envs)
-    (cmdlist--save-everything
+    (cmdlist--save-everything-widen
       (goto-char (point-min))
       (while (search-forward "\\begin{" nil t)
         (backward-char)
@@ -810,7 +829,7 @@ The name and letter are queried for, and by default are both the latex macro und
 (defun cmdlist--get-newtheorem-dependencies ()
   "Get a list of all the optional arguments in newtheorem commands appearing after the first (bracketed) argument."
     (let (res)
-      (cmdlist--save-everything
+      (cmdlist--save-everything-widen
         (goto-char (point-min))
         (while (re-search-forward (concat cmdlist--newthm-regex "{[a-zA-Z]*}\\[\\([a-zA-Z]*\\)\\]") nil t)
           (add-to-list 'res (match-string-no-properties 1)))
@@ -924,7 +943,7 @@ The name and letter are queried for, and by default are both the latex macro und
 (defun cmdlist--scan-for-defined-envs ()
   "Return a list of all environments defined by `\\\(re\)newenvironment's in the current buffer."
   (let ((res))
-    (cmdlist--save-everything
+    (cmdlist--save-everything-widen
       (goto-char (point-min))
       (while (re-search-forward "\\\\r?e?newenvironment" nil t)
         (push (car (split-string (cmdlist--shloop-latex-arg) nil nil "[{}]")) res)))
@@ -933,7 +952,7 @@ The name and letter are queried for, and by default are both the latex macro und
 (defun cmdlist--scan-for-packages ()
   "Return a list of all packages `\\usepackage'd in current buffer."
   (let ((res))
-    (cmdlist--save-everything
+    (cmdlist--save-everything-widen
       (goto-char (point-min))
       (while (re-search-forward "\\\\\\(usepackage\\|RequirePackage\\)" nil t)
         (while (not (eq (char-after) ?{)) (forward-sexp))
@@ -942,7 +961,7 @@ The name and letter are queried for, and by default are both the latex macro und
 
 (defun cmdlist--get-document-class ()
   "Return a singleton list with the document class of this document or `nil'."
-  (cmdlist--save-everything
+  (cmdlist--save-everything-widen
     (goto-char (point-min))
     (when (search-forward "\\documentclass")
       (while (not (eq (char-after) ?{)) (forward-sexp))
@@ -1065,7 +1084,7 @@ The name and letter are queried for, and by default are both the latex macro und
   (let* ((res)
          (cmds (mapcar (lambda (x) (if (stringp x) x (car x))) cmdlist-cmd-defining-cmds))
          (regx (concat "\\\\\\(" (mapconcat 'regexp-quote cmds "\\|") "\\)[^*@a-zA-Z]")))
-    (cmdlist--save-everything
+    (cmdlist--save-everything-widen
       (goto-char (point-min))
       (while (re-search-forward regx nil t)
         (let ((match (match-string-no-properties 1))
@@ -1142,7 +1161,7 @@ The name and letter are queried for, and by default are both the latex macro und
                        ;; Otherwise, act on it
                        ;; (unless we are ignoring all missing commands)
                        (unless cmdlist--local-ignored-cmds
-                         (cmdlist--save-everything
+                         (cmdlist--save-everything-widen
                            ;; Display the command in question in the buffer
                            (goto-char (point-min))
                            (let ((case-fold-search nil))
