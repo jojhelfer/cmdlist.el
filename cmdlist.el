@@ -1160,7 +1160,7 @@ The name and letter are queried for, and by default are both the latex macro und
                            (setq curex ""))
                        ;; Otherwise, act on it
                        ;; (unless we are ignoring all missing commands)
-                       (unless cmdlist--local-ignored-cmds
+                       (unless (eq cmdlist--local-ignored-cmds t)
                          (cmdlist--save-everything-widen
                            ;; Display the command in question in the buffer
                            (goto-char (point-min))
