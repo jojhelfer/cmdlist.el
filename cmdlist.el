@@ -741,7 +741,7 @@ The name and letter are queried for, and by default are both the latex macro und
         (let ((cmd-pos))
           (cmdlist--save-everything
             (goto-char (point-min))
-            (when (re-search-forward (concat cmdlist--newcmd-regex "{?\\\\" cmd "[}{\\[]" cmd) nil t)
+            (when (re-search-forward (concat cmdlist--newcmd-regex "{?\\\\" cmd "[}{\\[]") nil t)
               (setq cmd-pos (point))))
           (when cmd-pos
             (goto-char cmd-pos)))))))
