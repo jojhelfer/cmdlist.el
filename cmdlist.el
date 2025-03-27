@@ -1,10 +1,10 @@
 ;;; cmdlist.el --- Automated latex command maintenance
 
-;; Copyright © 2020-2022 Joseph Helfer
+;; Copyright © 2020-2025 Joseph Helfer
 
 ;; Author: Joseph Helfer
 ;; URL: https://github.com/jojhelfer/cmdlist.el
-;; Version: 1.2.2
+;; Version: 1.2.3
 ;; Package-Requires: ((emacs "25.1"))
 
 ;; This file is NOT part of GNU Emacs.
@@ -170,17 +170,34 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
       (setq res (string-to-number response)))
   res))
 
+(defun cmdlist-odd-chars-p (char &optional pos)
+  "Return t if point is preceded by an odd number of occurrences of CHAR, otherwise return nil. If POS is given, perform the check starting at POS instead of point."
+  (unless pos (setq pos (point)))
+  (let ((count 0))
+    (save-everything
+      (goto-char pos)
+      (while (eq (char-before) char)
+        (setq count (1+ count))
+        (backward-char)))
+    (cl-oddp count)))
+
 (defun cmdlist--forward-brexp ()
   "Move forward across one matching curly bracket expression."
   (interactive)
   (let ((started nil))
-    (while (and (search-forward "{" nil nil)
-                (if (eq (char-before (1- (point))) ?\\) t (setq started t) nil)))
+    (while (and
+            ;; Look for the first opening brace
+            (search-forward "{" nil t)
+            ;; If it was escaped, keep going, otherwise, set started to t
+                (if (cmdlist-odd-chars-p ?\\ (1- (point))) t
+                  (setq started t) nil)))
+    ;; Check if we found an opening brace at all
     (when started
       (let ((count 1))
         (while (> count 0)
-          (re-search-forward "[{}]")
-          (unless (eq (char-before (1- (point))) ?\\)
+          (re-search-forward "[{}]" nil t)
+          ;; Ignore escaped braces
+          (unless (cmdlist-odd-chars-p ?\\ (1- (point)))
             (setq count (+ count
                            (if (eq (char-before) ?\{) 1 -1)))))))))
 
@@ -319,9 +336,18 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
           (buffer-substring-no-properties beg (point)))))))
 
 (defun cmdlist--scan-for-latex-cmds (&optional ignore-newcmds)
-  "Return all names of latex commands in current buffer."
-  (let (cmds last-newcmd-pos)
+  "Return all names of latex commands in current buffer before `\\end{document}' (or EOF if the latter doesn't occur)."
+  (let (cmds last-newcmd-pos end-doc-pos)
     (cmdlist--save-everything-widen
+      (goto-char (point-min))
+      ;; Search for \end{document} and set end-doc-pos to non-nil if we find it
+      (while (and (setq end-doc-pos (search-forward "\\end{document}" nil t))
+                  ;; If we're in a comment then keep searching
+                  (TeX-in-comment))
+        ;; We were in a comment so set end-doc-pos back to nil
+        (setq end-doc-pos nil))
+      ;; We found a non-commented \end{document} so set end-doc-pos
+      (when end-doc-pos (setq end-doc-pos (point)))
       (when ignore-newcmds
         (goto-char (point-max))
         (if (not (re-search-backward cmdlist--newcmd-regex nil t))
@@ -332,7 +358,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
           (cmdlist--forward-brexp)
           (setq last-newcmd-pos (point))))
       (goto-char (point-min))
-      (while (search-forward "\\" nil t)
+      (while (search-forward "\\" end-doc-pos t)
         ;; Make sure it's not a double backslash
         (unless (and
                  (or (eq (char-after) ?\\)
