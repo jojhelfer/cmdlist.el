@@ -4,7 +4,7 @@
 
 ;; Author: Joseph Helfer
 ;; URL: https://github.com/jojhelfer/cmdlist.el
-;; Version: 1.2.3
+;; Version: 1.2.4
 ;; Package-Requires: ((emacs "25.1"))
 
 ;; This file is NOT part of GNU Emacs.
@@ -1125,6 +1125,9 @@ The name and letter are queried for, and by default are both the latex macro und
                 (progn
                   ;; Take back the "look-ahead" in the regex
                   (backward-char)
+                  ;; Skip optional arg if present
+                  (when (eq (char-after) ?\[)
+                            (cmdlist--shloop-optional-latex-arg))
                   ;; Remove any surrounding brackets and backslashes
                   (car (split-string (cmdlist--shloop-latex-arg) nil nil "\\\\?[{}]*")))))
           (if (member match cmdlist-cmd-defining-cmds)
