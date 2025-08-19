@@ -1064,35 +1064,42 @@ The name and letter are queried for, and by default are both the latex macro und
   (unless package-file (setq package-file cmdlist-package-file))
   (unless builtin-file (setq builtin-file cmdlist-builtin-file))
   ;; Prompt to add new builtin or add to a package
-  (let ((decision
-         (read-char (concat (propertize prompt 'face 'shadow)
-                            (when (> (length prompt) 0)
-                              (propertize "-------------------------------\n" 'face 'shadow))
-                            "Command or environment `" c-or-e "' not found.\n"
-                            "What to do?\n"
-                            "(p) assign a package to it\n"
-                            "(d) assign to current documentclass\n"
-                            "(D) assign a documentclass to it\n"
-                            "(b) add it as a builtin\n"
-                            "(i) ignore it and don't ask again in this buffer\n"
-                            "(I) ignore it and don't ask again about any missing commands in this buffer\n"
-                            (when allow-edit-here "(t) test it in a minimal LaTeX file\n")
-                            (when allow-edit-here "(e) edit the buffer here\n")
-                            "(↵) (or any other key) do nothing"))))
+  (let* ((msg (concat (propertize prompt 'face 'shadow)
+                      (when (> (length prompt) 0)
+                        (propertize "-------------------------------\n" 'face 'shadow))
+                      "Command or environment `" c-or-e "' not found.\n"
+                      "What to do?\n"
+                      "(p) assign a package to it\n"
+                      "(d) assign to current documentclass\n"
+                      "(D) assign a documentclass to it\n"
+                      "(b) add it as a builtin\n"
+                      "(i) ignore it and don't ask again in this buffer\n"
+                      "(I) ignore it and don't ask again about any missing commands in this buffer\n"
+                      (when allow-edit-here "(t) test it in a minimal LaTeX file\n")
+                      (when allow-edit-here "(e) edit the buffer here\n")
+                      "(↵) (or any other key) do nothing"))
+         (decision
+          (save-window-excursion
+            (let ((buf (get-buffer-create "*cmdlist-question*")))
+              (with-output-to-temp-buffer buf
+                (princ msg))
+              (prog1 (read-char "Choice? (p/d/D/b/i/I/t/e/↵)")
+                (when (buffer-live-p buf)
+                  (kill-buffer buf)))))))
     (pcase decision
-     (?e (when allow-edit-here (throw 'edit-here (cons 'edit (point)))))
-     (?t (when allow-edit-here (throw 'edit-here (cons c-or-e (point)))))
-     (?p (cmdlist--choose-and-add-package-or-class c-or-e package-file nil))
-     (?D (cmdlist--choose-and-add-package-or-class c-or-e package-file t))
-     (?d
-      (cmdlist--choose-and-add-package-or-class c-or-e package-file t
-                                               (car (cmdlist--get-document-class))))
-     (?i
-      (push c-or-e cmdlist--local-ignored-cmds)
-      (concat "`" c-or-e "' marked temporarily as a file-local command\n"))
-     (?I
-      (setq cmdlist--local-ignored-cmds t))
-     (?b
+      (?e (when allow-edit-here (throw 'edit-here (cons 'edit (point)))))
+      (?t (when allow-edit-here (throw 'edit-here (cons c-or-e (point)))))
+      (?p (cmdlist--choose-and-add-package-or-class c-or-e package-file nil))
+      (?D (cmdlist--choose-and-add-package-or-class c-or-e package-file t))
+      (?d
+       (cmdlist--choose-and-add-package-or-class c-or-e package-file t
+                                                 (car (cmdlist--get-document-class))))
+      (?i
+       (push c-or-e cmdlist--local-ignored-cmds)
+       (concat "`" c-or-e "' marked temporarily as a file-local command\n"))
+      (?I
+       (setq cmdlist--local-ignored-cmds t))
+      (?b
        (with-temp-file builtin-file
          (when (file-exists-p builtin-file)
            (insert-file-contents builtin-file))
