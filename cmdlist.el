@@ -4,7 +4,7 @@
 
 ;; Author: Joseph Helfer
 ;; URL: https://github.com/jojhelfer/cmdlist.el
-;; Version: 1.2.5
+;; Version: 1.2.6
 ;; Package-Requires: ((emacs "25.1"))
 
 ;; This file is NOT part of GNU Emacs.
@@ -224,20 +224,24 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
     (insert-file-contents file)
     (split-string (buffer-string) "\n" t)))
 
-(defun cmdlist--file-exists-p (file)
-  "Call `file-exists-p' (and return its value) and print an error message if it returns `nil'. FILE can also be a list whose car is a filename, or a symbol whose `symbol-value' is the name of a file (or a list whose `car' is the filename), in which case mention the symbol name in the error message as well."
+(defun cmdlist--file-exists-p (file &optional writable)
+  "Call `file-exists-p' (or, if WRITABLE is non-nil, `file-writable-p') and return its value, and print an error message if it returns `nil'. FILE can also be a list whose car is a filename, or a symbol whose `symbol-value' is the name of a file (or a list whose `car' is the filename), in which case mention the symbol name in the error message as well."
   (let ((symb (when (symbolp file) file)))
     (when symb
       (setq file (symbol-value file)))
     (when (listp file)
       (setq file (car file)))
-    (or (file-exists-p file)
+    (or (if writable
+            (file-writable-p file)
+          (file-exists-p file))
         (progn
           (message
            (concat
             "The file `" file "' "
             (when symb (concat "(the value of the variable `" (symbol-name symb) "') "))
-            "does not exist."))
+            "does not exist"
+            (when writable " or is not writable")
+            "."))
           nil))))
 
 ;;;;;;;;;;;;;;;;;;;;;;
@@ -610,22 +614,26 @@ this macro."
 (defun cmdlist-update-latex-buffer (&optional heading files prefix)
   "Add to current buffer under HEADING all commands defined in FILES which are present in the current file and not already defined. If PREFIX is non-nil, it is prepended to `\\newcommand'.
 
-By default HEADING is `cmdlist-heading' and FILES are the files in the variable `cmdlist-files'."
+By default HEADING is `cmdlist-heading' and FILES are the files in the variable `cmdlist-files'.
+
+Return non-nil if required config files exist, otherwise nil."
   (interactive)
   (when (cmdlist--file-exists-p (or files 'cmdlist-files))
-    (unless heading (setq heading cmdlist-heading))
-    (unless files (setq files cmdlist-files))
-    (unless prefix (setq prefix ""))
-    (let* ((cmdlist (apply 'append (mapcar 'cmdlist--scan-file-for-newcmds files)))
-           (cmds (cmdlist--scan-for-latex-cmds))
-           (exceptions (append (mapcar 'cmdlist--newcmd-name (cmdlist--scan-for-newcmds)) (cmdlist--scan-for-other-defined-cmds) cmdlist-newcommands-to-ignore))
-           (newcmds (cmdlist--select-cmds-from-cmdlist cmdlist cmds exceptions)))
-      (if newcmds
-          (progn
-            (setq newcmds (mapcar (lambda (x) (concat prefix x)) newcmds))
-            (cmdlist--stick-at-top heading newcmds 'cmdlist--sort-newcmds)
-            (message "Added %d new commands:\n%s" (length newcmds) (cmdlist--list-of-things newcmds)))
-        (message "No commands added.")))))
+    ;; Return `t' since we found the needed files
+    (prog1 t
+      (unless heading (setq heading cmdlist-heading))
+      (unless files (setq files cmdlist-files))
+      (unless prefix (setq prefix ""))
+      (let* ((cmdlist (apply 'append (mapcar 'cmdlist--scan-file-for-newcmds files)))
+             (cmds (cmdlist--scan-for-latex-cmds))
+             (exceptions (append (mapcar 'cmdlist--newcmd-name (cmdlist--scan-for-newcmds)) (cmdlist--scan-for-other-defined-cmds) cmdlist-newcommands-to-ignore))
+             (newcmds (cmdlist--select-cmds-from-cmdlist cmdlist cmds exceptions)))
+        (if newcmds
+            (progn
+              (setq newcmds (mapcar (lambda (x) (concat prefix x)) newcmds))
+              (cmdlist--stick-at-top heading newcmds 'cmdlist--sort-newcmds)
+              (message "Added %d new commands:\n%s" (length newcmds) (cmdlist--list-of-things newcmds)))
+          (message "No commands added."))))))
 
 (defun add-headers (headers)
   "Add each string in the list HEADERS to the top of the document under the `documentclass' line. Each string is inserted preceded by `% ' and separated by a blank line. Do nothing and return `nil' if the document class line is not found, else return `t'."
@@ -645,7 +653,7 @@ By default HEADING is `cmdlist-heading' and FILES are the files in the variable 
 (defun cmdlist-add-cmd-to-file ()
   "Add the `\\newcommand' definition under point to the first entry of `cmdlist-files'."
   (interactive)
-  (when (cmdlist--file-exists-p 'cmdlist-files)
+  (when (cmdlist--file-exists-p 'cmdlist-files t)
     (let ((newcmd (cmdlist--surrounding-newcmd)))
       (when newcmd
         (cmdlist--add-newcmd (cmdlist--surrounding-newcmd) nil t)))))
@@ -655,7 +663,7 @@ By default HEADING is `cmdlist-heading' and FILES are the files in the variable 
     (interactive "P")
     (when cmdlist-add-to-file-default
       (setq tofile (not tofile)))
-    (when (or (not tofile) (cmdlist--file-exists-p 'cmdlist-files))
+    (when (or (not tofile) (cmdlist--file-exists-p 'cmdlist-files t))
       (let* ((newcmd (cmdlist--generate-newcmd))
              (tobuf (and tofile
                          cmdlist-also-add-to-buffer
@@ -670,7 +678,7 @@ By default HEADING is `cmdlist-heading' and FILES are the files in the variable 
 
 The name and letter are queried for, and by default are both the latex macro under point."
   (when (or (not file)
-            (cmdlist--file-exists-p (if (eq file t) 'cmdlist-files file)))
+            (cmdlist--file-exists-p (if (eq file t) 'cmdlist-files file) t))
     (let* ((name (read-from-minibuffer
                   (format "Name of %s command? \\" font) (cmdlist--latex-cmd-under-point)))
            (letter (read-from-minibuffer "Text? " name)))
@@ -803,7 +811,9 @@ The name and letter are queried for, and by default are both the latex macro und
             (goto-char cmd-pos)))))))
 
 (defun cmdlist-conditional-update-buffer ()
-  "If `cmdlist-heading' is present in the buffer, run `cmdlist-update-latex-buffer'. If furthermore either of `cmdlist-theorem-heading' or `cmdlist-package-heading' is present, run `cmdlist-newthm-update-latex-buffer' or `cmdlist-package-update-latex-buffer', respectively."
+  "If `cmdlist-heading' is present in the buffer, run `cmdlist-update-latex-buffer'. If furthermore either of `cmdlist-theorem-heading' or `cmdlist-package-heading' is present, run `cmdlist-newthm-update-latex-buffer' or `cmdlist-package-update-latex-buffer', respectively.
+
+Return non-nil if required config files exist, otherwise nil."
   (interactive)
   (let ((has-heading nil)
         (has-thm-heading nil)
@@ -815,19 +825,18 @@ The name and letter are queried for, and by default are both the latex macro und
       (setq has-thm-heading (re-search-forward (concat "^" cmdlist-theorem-heading "$") nil t))
       (goto-char (point-min))
       (setq has-pkg-heading (re-search-forward (concat "^" cmdlist-package-heading "$") nil t)))
-    (when has-heading
-      (cmdlist-update-latex-buffer)
-      (when has-thm-heading
-        (cmdlist-newthm-update-latex-buffer))
-      (when has-pkg-heading
-        (cmdlist-package-update-latex-buffer)))))
+    ;; This will be non-nill precisely if all needed config files exist
+    (and has-heading (cmdlist-update-latex-buffer)
+         has-thm-heading (cmdlist-newthm-update-latex-buffer)
+         has-pkg-heading (cmdlist-package-update-latex-buffer))))
 
 (defun cmdlist-update-save-and-compile ()
   "Save buffer, run `cmdlist-conditional-update-buffer', and then compile with `Tex-command'."
   (interactive)
-  (cmdlist-conditional-update-buffer)
-  (save-buffer)
-  (TeX-command "LaTeX" 'TeX-master-file nil))
+  ;; Only save and compile if we were able to find the needed config files
+  (when (cmdlist-conditional-update-buffer)
+    (save-buffer)
+    (TeX-command "LaTeX" 'TeX-master-file nil)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Environments and theorems ;;
@@ -892,35 +901,39 @@ The name and letter are queried for, and by default are both the latex macro und
         res)))
 
 (defun cmdlist-newthm-update-latex-buffer (&optional file)
-  "Add to current buffer all ``\\newtheorem's defined in FILE (using `cmdlist--stick-thm-at-top') which are present in the current file and not already defined. By default FILE is `cmdlist-theorem-file'. Return a list of the new theorems added."
+  "Add to current buffer all ``\\newtheorem's defined in FILE (using `cmdlist--stick-thm-at-top') which are present in the current file and not already defined. By default FILE is `cmdlist-theorem-file'. Return a list of the new theorems added.
+
+Return non-nil if required config files exist, otherwise nil."
   ;; This was originally adapted from `cmdlist-update-latex-buffer' but now seems different enough that there isn't anything obvious to factor out.
   (interactive)
   (when (cmdlist--file-exists-p (or file 'cmdlist-theorem-file))
-    (unless file (setq file cmdlist-theorem-file))
-    (let* ((thmlist (cmdlist--scan-file-for-newcmds file cmdlist--newthm-regex))
-           (envs (append (cmdlist--scan-for-latex-envs) (cmdlist--get-newtheorem-dependencies)))
-           (exceptions (mapcar #'(lambda (x) (cmdlist--newcmd-name x cmdlist--newthm-regex)) (cmdlist--scan-for-newcmds cmdlist--newthm-regex)))
-           (newthms
-            (seq-filter
-             (lambda (thm)
-               (let ((thmname (cmdlist--newcmd-name thm cmdlist--newthm-regex)))
-                 (and (member thmname envs)
-                      (not (member thmname exceptions)))))
-             thmlist)))
-      (if (not newthms)
-          (message "No theorems added.")
-        (dolist (thm newthms)
-          (cmdlist--stick-thm-at-top thm))
-        ;; If we have introduced any new dependencies, run it again
-        (when (cl-some
-               (lambda (dep)
-                 (and (member dep thmlist)
-                      (not (member dep envs))
-                      (not (member dep exceptions))))
-               (cmdlist--get-newtheorem-dependencies))
-          (setq newthms (append newthms (cmdlist-newthm-update-latex-buffer))))
-        (message "Added %d new theorem:\n%s" (length newthms) (cmdlist--list-of-things newthms))
-        newthms))))
+    ;; Return `t' since we found the needed files
+    (prog1 t
+      (unless file (setq file cmdlist-theorem-file))
+      (let* ((thmlist (cmdlist--scan-file-for-newcmds file cmdlist--newthm-regex))
+             (envs (append (cmdlist--scan-for-latex-envs) (cmdlist--get-newtheorem-dependencies)))
+             (exceptions (mapcar #'(lambda (x) (cmdlist--newcmd-name x cmdlist--newthm-regex)) (cmdlist--scan-for-newcmds cmdlist--newthm-regex)))
+             (newthms
+              (seq-filter
+               (lambda (thm)
+                 (let ((thmname (cmdlist--newcmd-name thm cmdlist--newthm-regex)))
+                   (and (member thmname envs)
+                        (not (member thmname exceptions)))))
+               thmlist)))
+        (if (not newthms)
+            (message "No theorems added.")
+          (dolist (thm newthms)
+            (cmdlist--stick-thm-at-top thm))
+          ;; If we have introduced any new dependencies, run it again
+          (when (cl-some
+                 (lambda (dep)
+                   (and (member dep thmlist)
+                        (not (member dep envs))
+                        (not (member dep exceptions))))
+                 (cmdlist--get-newtheorem-dependencies))
+            (setq newthms (append newthms (cmdlist-newthm-update-latex-buffer))))
+          (message "Added %d new theorem:\n%s" (length newthms) (cmdlist--list-of-things newthms))
+          newthms)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Packages and built-ins ;;
@@ -1036,42 +1049,42 @@ The name and letter are queried for, and by default are both the latex macro und
 
 (defun cmdlist--choose-and-add-package-or-class (cmd &optional package-file class pkgchoice)
   "Prompt for a package (or if CLASS, document class) from PACKAGE-FILE (default `cmdlist-package-file') and add cmd to it. Create a new package or class if necessary. Then sort the package file. Return a newline-terminated message explaining what happened. If PKGCHOICE is non-nil, use that as chosen package or document class instead of prompting."
-  (unless package-file (setq package-file cmdlist-package-file))
-  (let* ((definer (if class "\\documentclass" "\\usepackage"))
-         (pkg-or-class-list
-          (mapcar (lambda (x) (cmdlist--newcmd-name x definer))
-                  (seq-filter
-                   (lambda (x) (string-prefix-p definer x))
-                   (cmdlist--read-lines package-file))))
-         (pkg
-          (or pkgchoice
-              (completing-read
-               (concat "Choose a " (if class "document class" "package") ": ")
-               pkg-or-class-list))))
-    (with-temp-file package-file
-      (when (file-exists-p package-file)
-        (insert-file-contents package-file))
-      (if (member pkg pkg-or-class-list)
-          ;; We are adding to an existing line.
-          (progn (goto-char (point-min))
-                 (search-forward (concat "{" pkg "}"))
-                 (beginning-of-line)
-                 (re-search-forward "%\\([^%]*\\)\\(%\\|$\\)" (line-end-position))
-                 (replace-match
-                  (save-match-data
-                    (mapconcat 'identity
-                               ;; Warning! (sort) is destructive! (see above warning)
-                               (seq-sort 'string<
-                                         (append (split-string (match-string 1) ",") (list cmd)))
-                               ","))
-                  t t nil 1))
-        ;; We are starting a new line.
-        (goto-char (point-max))
-        ;; In case the file is not newline-terminated as it should be
-        (unless (or (eq (point) (point-min)) (eq (char-before) ?\n)) (insert "\n"))
-        (insert (if class "\\documentclass{" "\\usepackage{") pkg "}%" cmd "\n"))
-      (cmdlist--package-and-class-sort))
-    (concat "`" cmd "' added to package `" pkg "'\n")))
+  (when (cmdlist--file-exists-p (or package-file 'cmdlist-package-file) t)
+    (unless package-file (setq package-file cmdlist-package-file))
+    (let* ((definer (if class "\\documentclass" "\\usepackage"))
+           (pkg-or-class-list
+            (mapcar (lambda (x) (cmdlist--newcmd-name x definer))
+                    (seq-filter
+                     (lambda (x) (string-prefix-p definer x))
+                     (cmdlist--read-lines package-file))))
+           (pkg
+            (or pkgchoice
+                (completing-read
+                 (concat "Choose a " (if class "document class" "package") ": ")
+                 pkg-or-class-list))))
+      (with-temp-file package-file
+        (insert-file-contents package-file)
+        (if (member pkg pkg-or-class-list)
+            ;; We are adding to an existing line.
+            (progn (goto-char (point-min))
+                   (search-forward (concat "{" pkg "}"))
+                   (beginning-of-line)
+                   (re-search-forward "%\\([^%]*\\)\\(%\\|$\\)" (line-end-position))
+                   (replace-match
+                    (save-match-data
+                      (mapconcat 'identity
+                                 ;; Warning! (sort) is destructive! (see above warning)
+                                 (seq-sort 'string<
+                                           (append (split-string (match-string 1) ",") (list cmd)))
+                                 ","))
+                    t t nil 1))
+          ;; We are starting a new line.
+          (goto-char (point-max))
+          ;; In case the file is not newline-terminated as it should be
+          (unless (or (eq (point) (point-min)) (eq (char-before) ?\n)) (insert "\n"))
+          (insert (if class "\\documentclass{" "\\usepackage{") pkg "}%" cmd "\n"))
+        (cmdlist--package-and-class-sort))
+      (concat "`" cmd "' added to package `" pkg "'\n"))))
 
 (defun cmdlist-test-command-in-minimal-file (&optional name)
   "Create and visit the file `cmdlist-test-minimal-file', and populate it with a minimal LaTeX file including the command which is prompted for (and defaults to the LaTeX command under point), so that you can test whether it is a built in command (or try to figure out what packages/document classes provide it."
@@ -1087,12 +1100,11 @@ The name and letter are queried for, and by default are both the latex macro und
    "  \\" name "\n"
    "\\end{document}\n"))
 
+;; TODO: it doesn't seem we're actually using `heading' in the following function
 (defun cmdlist--act-on-orphaned-command (c-or-e &optional prompt heading package-file builtin-file allow-edit-here)
   "Give the option of assigning the given command or environment name to a package, or to add it to the list of builtin commands. Return a newline-terminated message saying what happened. If ALLOW-EDIT-HERE is non-nil, offer option to edit buffer at current position or to run `cmdlist-test-command-in-minimal-file'. In either case, `throw' the symbol `edit-here' with a cons pair, in which the second element is the current point, and the first element is the symbol `edit' or `c-or-e', respectively."
   (unless prompt (setq prompt ""))
   (unless heading (setq heading cmdlist-package-heading))
-  (unless package-file (setq package-file cmdlist-package-file))
-  (unless builtin-file (setq builtin-file cmdlist-builtin-file))
   ;; Prompt to add new builtin or add to a package
   (let* ((msg (concat (propertize prompt 'face 'shadow)
                       (when (> (length prompt) 0)
@@ -1125,16 +1137,17 @@ The name and letter are queried for, and by default are both the latex macro und
       (?I
        (setq cmdlist--local-ignored-cmds t))
       (?b
-       (with-temp-file builtin-file
-         (when (file-exists-p builtin-file)
-           (insert-file-contents builtin-file))
-         (goto-char (point-max))
-         ;; In case the file is not newline-terminated as it should be
-         (unless (or (eq (point) (point-min)) (eq (char-before) ?\n)) (insert "\n"))
-         (insert c-or-e "\n")
-         (let ((sort-fold-case t))
-           (sort-lines nil (point-min) (point-max))))
-       (concat "`" c-or-e "' added as builtin\n")))))
+       (when (cmdlist--file-exists-p (or builtin-file 'cmdlist-builtin-file) t)
+         (with-temp-file builtin-file
+           (unless builtin-file (setq builtin-file cmdlist-builtin-file))
+           (insert-file-contents builtin-file)
+           (goto-char (point-max))
+           ;; In case the file is not newline-terminated as it should be
+           (unless (or (eq (point) (point-min)) (eq (char-before) ?\n)) (insert "\n"))
+           (insert c-or-e "\n")
+           (let ((sort-fold-case t))
+             (sort-lines nil (point-min) (point-max)))
+           (concat "`" c-or-e "' added as builtin\n")))))))
 
 (defun cmdlist--scan-for-other-defined-cmds ()
   "Return a list of all commands defined in the current buffer using commands in `cmdlist-cmd-defining-cmds'."
@@ -1180,68 +1193,72 @@ The name and letter are queried for, and by default are both the latex macro und
           (let ((l cmdlist--local-ignored-cmds)) (when (listp l) l))))
 
 (defun cmdlist-package-update-latex-buffer (&optional heading package-file builtin-file)
-  "Add to current buffer all ``\\usepackage's defined in PACKAGE-FILE (default is `cmdlist-package-file') under HEADING (default is `cmdlist-package-heading') which provide commands or environments present in the current file and not built-in (according to BUITLIN-FILE, default `cmdlist-builtin-file') or already defined. Prompt to act on any unmatched commands or enviornments."
+  "Add to current buffer all ``\\usepackage's defined in PACKAGE-FILE (default is `cmdlist-package-file') under HEADING (default is `cmdlist-package-heading') which provide commands or environments present in the current file and not built-in (according to BUITLIN-FILE, default `cmdlist-builtin-file') or already defined. Prompt to act on any unmatched commands or enviornments.
+
+Return non-nil if required config files exist, otherwise nil."
   (interactive)
   ;; This was originally adapted from `cmdlist-update-latex-buffer' but now seems different enough that there isn't anything obvious to factor out.
   (when (and (cmdlist--file-exists-p (or package-file 'cmdlist-package-file))
              (cmdlist--file-exists-p (or builtin-file 'cmdlist-builtin-file)))
-    (unless heading (setq heading cmdlist-package-heading))
-    (unless package-file (setq package-file cmdlist-package-file))
-    (unless builtin-file (setq builtin-file cmdlist-builtin-file))
-    (let ((cmds-and-envs (append (cmdlist--scan-for-latex-cmds) (cmdlist--scan-for-latex-envs)))
-          (exceptions (cmdlist--buffer-provided-cmds package-file builtin-file))
-          (curex "")
-          (lastmessage ""))
-      ;; Warning! (sort) is destructive! (see above warning)
-      (setq cmds-and-envs (cl-remove-duplicates (seq-sort 'string< cmds-and-envs)))
-      (setq exceptions (cl-remove-duplicates (seq-sort 'string< exceptions)))
-      ;; This catches the `edit-here' possibly thrown by `cmdlist--act-on-orphaned-command' and goes to the point thrown by that `throw'
-      (let ((edit-point
-             (catch 'edit-here
-               (dolist (c-or-e cmds-and-envs)
-                 ;; Check if c-or-e is an exception or has an @-sign
-                 (unless (or (and cmdlist-ignore-at-symbol (member ?@ (string-to-list c-or-e)))
-                             (progn
-                               (while (and (string< curex c-or-e)
-                                           exceptions)
-                                 (setq curex (pop exceptions)))
-                               (string= curex c-or-e)))
-                   ;; Find a matching package
-                   (let ((pkgmatch (cmdlist--singleton-or-prompt
-                                    (cmdlist--match-in-package-file c-or-e t package-file)
-                                    (concat "\n Multiple packages provide `"
-                                            c-or-e "'. Choose one: "))))
-                     ;; If we found one, add it, and refresh exceptions.
-                     (if pkgmatch
-                         (progn
-                           (cmdlist--stick-at-top heading pkgmatch)
-                           (setq exceptions (cmdlist--buffer-provided-cmds package-file builtin-file))
-                           ;; Warning! (sort) is destructive! (see above warning)
-                           (setq exceptions (cl-remove-duplicates (seq-sort 'string< exceptions)))
-                           (setq curex ""))
-                       ;; Otherwise, act on it
-                       ;; (unless we are ignoring all missing commands)
-                       (unless (eq cmdlist--local-ignored-cmds t)
-                         (cmdlist--save-everything-widen
-                           ;; Display the command in question in the buffer
-                           (goto-char (point-min))
-                           (let ((case-fold-search nil))
-                             (re-search-forward (concat "\\\\\\(begin{\\)?{?"
-                                                        (regexp-quote c-or-e)
-                                                        "\\($\\|[^a-zA-Z]\\)"))
-                             (goto-char (match-beginning 0)))
-                           (setq lastmessage
-                                 (cmdlist--act-on-orphaned-command
-                                  c-or-e lastmessage heading package-file builtin-file t))
-                           ;; This is so catch only returns non-nil in the case of a throw
-                           nil)))))))))
-        (when edit-point
-          (push-mark)
-          (when (member 'evil features)
-            (evil-set-jump))
-          (goto-char (cdr edit-point))
-          (unless (eq (car edit-point) 'edit)
-            (cmdlist-test-command-in-minimal-file (car edit-point))))))))
+    ;; Return `t' since we found the needed files
+    (prog1 t
+      (unless heading (setq heading cmdlist-package-heading))
+      (unless package-file (setq package-file cmdlist-package-file))
+      (unless builtin-file (setq builtin-file cmdlist-builtin-file))
+      (let ((cmds-and-envs (append (cmdlist--scan-for-latex-cmds) (cmdlist--scan-for-latex-envs)))
+            (exceptions (cmdlist--buffer-provided-cmds package-file builtin-file))
+            (curex "")
+            (lastmessage ""))
+        ;; Warning! (sort) is destructive! (see above warning)
+        (setq cmds-and-envs (cl-remove-duplicates (seq-sort 'string< cmds-and-envs)))
+        (setq exceptions (cl-remove-duplicates (seq-sort 'string< exceptions)))
+        ;; This catches the `edit-here' possibly thrown by `cmdlist--act-on-orphaned-command' and goes to the point thrown by that `throw'
+        (let ((edit-point
+               (catch 'edit-here
+                 (dolist (c-or-e cmds-and-envs)
+                   ;; Check if c-or-e is an exception or has an @-sign
+                   (unless (or (and cmdlist-ignore-at-symbol (member ?@ (string-to-list c-or-e)))
+                               (progn
+                                 (while (and (string< curex c-or-e)
+                                             exceptions)
+                                   (setq curex (pop exceptions)))
+                                 (string= curex c-or-e)))
+                     ;; Find a matching package
+                     (let ((pkgmatch (cmdlist--singleton-or-prompt
+                                      (cmdlist--match-in-package-file c-or-e t package-file)
+                                      (concat "\n Multiple packages provide `"
+                                              c-or-e "'. Choose one: "))))
+                       ;; If we found one, add it, and refresh exceptions.
+                       (if pkgmatch
+                           (progn
+                             (cmdlist--stick-at-top heading pkgmatch)
+                             (setq exceptions (cmdlist--buffer-provided-cmds package-file builtin-file))
+                             ;; Warning! (sort) is destructive! (see above warning)
+                             (setq exceptions (cl-remove-duplicates (seq-sort 'string< exceptions)))
+                             (setq curex ""))
+                         ;; Otherwise, act on it
+                         ;; (unless we are ignoring all missing commands)
+                         (unless (eq cmdlist--local-ignored-cmds t)
+                           (cmdlist--save-everything-widen
+                             ;; Display the command in question in the buffer
+                             (goto-char (point-min))
+                             (let ((case-fold-search nil))
+                               (re-search-forward (concat "\\\\\\(begin{\\)?{?"
+                                                          (regexp-quote c-or-e)
+                                                          "\\($\\|[^a-zA-Z]\\)"))
+                               (goto-char (match-beginning 0)))
+                             (setq lastmessage
+                                   (cmdlist--act-on-orphaned-command
+                                    c-or-e lastmessage heading package-file builtin-file t))
+                             ;; This is so catch only returns non-nil in the case of a throw
+                             nil)))))))))
+          (when edit-point
+            (push-mark)
+            (when (member 'evil features)
+              (evil-set-jump))
+            (goto-char (cdr edit-point))
+            (unless (eq (car edit-point) 'edit)
+              (cmdlist-test-command-in-minimal-file (car edit-point)))))))))
 
 (defun cmdlist-package-handle-command (&optional c-or-e heading package-file builtin-file)
   "Like `cmdlist-package-update-latex-buffer', but only do it for given command. If C-OR-E is nil, prompt for command, defaulting to command at point."
