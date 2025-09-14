@@ -4,7 +4,7 @@
 
 ;; Author: Joseph Helfer
 ;; URL: https://github.com/jojhelfer/cmdlist.el
-;; Version: 1.2.4
+;; Version: 1.2.5
 ;; Package-Requires: ((emacs "25.1"))
 
 ;; This file is NOT part of GNU Emacs.
@@ -735,24 +735,54 @@ The name and letter are queried for, and by default are both the latex macro und
   (interactive)
   (let ((unuseds (append (cmdlist--get-unused-newcmds) (cmdlist--get-unused-newthms))))
     (if unuseds
-        (message "Seemingly unused commands:\n\n%s" (mapconcat #'identity unuseds "\n"))
+        (if (length< unuseds (/ (frame-height) 2))
+            (let ((max-mini-window-height 0.9))
+              (read-char (format "Seemingly unused commands:\n\n%s" (mapconcat #'identity unuseds "\n"))))
+        (with-help-window (help-buffer)
+            (princ (format "Seemingly unused commands:\n\n%s" (mapconcat #'identity unuseds "\n")))))
       (message "No unused commands found"))))
 
 (defun cmdlist-delete-unused-newcmds ()
   "Delete (seemingly) unused `\\\(re\)newcommand's and `\\\\newtheorem's in this buffer, after prompting."
   (interactive)
   (let ((unuseds (append (cmdlist--get-unused-newcmds) (cmdlist--get-unused-newthms))))
-    (if unuseds
-        (when (y-or-n-p (format "Seemingly unused commands:\n%s\nDelete? " (cmdlist--list-of-things unuseds)))
+    (if (not unuseds)
+        (message "No unused commands found")
+      (let ((decision))
+        ;; Show the unused commands and ask whether they should be deleted
+        (if (length< unuseds (/ (frame-height) 2))
+            ;; If there are few, just show in a minibuffer
+            (setq decision
+                  (y-or-n-p (format "Seemingly unused commands:\n%s\nDelete? " (cmdlist--list-of-things unuseds))))
+          ;; If there are many, show in a separate buffer
+          (save-window-excursion
+            (let ((buf (get-buffer-create "*unused-commands*"))
+                  (choice))
+              (with-current-buffer buf
+                (delete-region (point-min) (point-max))
+                (insert "Seemingly unused commands:\n" (cmdlist--list-of-things unuseds)))
+              (switch-to-buffer-other-window buf)
+              (goto-char (point-min))
+              (let ((choice))
+                (while (not (member choice '(?y ?n ?q)))
+                  (setq choice (read-char "Delete these newcommands? (y/n) (or SPC/DEL to scroll)"))
+                  (pcase choice
+                    (?  (when (< (window-end) (point-max)) (scroll-up)))
+                    (?\C-? (when (> (window-start) (point-min)) (scroll-down)))
+                    (?y (setq decision t))
+                    (?n (setq decision nil)))))
+              (when (buffer-live-p buf)
+                (kill-buffer buf)))))
+        (if (not decision)
+            (message "Doing nothing")
           (dolist (x unuseds)
             (cmdlist--save-everything-widen
               (goto-char (point-min))
               (let ((case-fold-search nil))
                 (search-forward x))
-              ; instead of kill-line, to avoid changing kill-ring
+              ;; instead of kill-line, to avoid changing kill-ring
               (delete-region (progn (beginning-of-line) (point))
-                             (1+ (progn (end-of-line) (point)))))))
-      (message "No unused commands found"))))
+                             (1+ (progn (end-of-line) (point)))))))))))
 
 (defun cmdlist-open-cmdlist-file ()
   "`(find-file-other-window (car cmdlist-files))'"
@@ -1079,13 +1109,8 @@ The name and letter are queried for, and by default are both the latex macro und
                       (when allow-edit-here "(e) edit the buffer here\n")
                       "(↵) (or any other key) do nothing"))
          (decision
-          (save-window-excursion
-            (let ((buf (get-buffer-create "*cmdlist-question*")))
-              (with-output-to-temp-buffer buf
-                (princ msg))
-              (prog1 (read-char "Choice? (p/d/D/b/i/I/t/e/↵)")
-                (when (buffer-live-p buf)
-                  (kill-buffer buf)))))))
+          (let ((max-mini-window-height 0.9))
+            (read-char msg))))
     (pcase decision
       (?e (when allow-edit-here (throw 'edit-here (cons 'edit (point)))))
       (?t (when allow-edit-here (throw 'edit-here (cons c-or-e (point)))))
