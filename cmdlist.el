@@ -828,10 +828,11 @@ Return non-nil if required config files exist, otherwise nil."
     ;; This will be non-nil precisely if all needed config files exist
     (cl-loop
      for x in
-     '((has-heading . cmdlist-update-latex-buffer)
-       (has-thm-heading . cmdlist-newthm-update-latex-buffer)
-       (has-pkg-heading . cmdlist-package-update-latex-buffer))
+     `((,has-heading . cmdlist-update-latex-buffer)
+       (,has-thm-heading . cmdlist-newthm-update-latex-buffer)
+       (,has-pkg-heading . cmdlist-package-update-latex-buffer))
      unless (car x) return t
+     do (message "%s" x)
      unless (funcall (cdr x)) return nil
      finally return t)))
 
