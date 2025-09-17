@@ -796,19 +796,7 @@ The name and letter are queried for, and by default are both the latex macro und
   "`(find-file-other-window (car cmdlist-files))'"
   (interactive)
   (when (cmdlist--file-exists-p 'cmdlist-files)
-    (let ((cmd (cmdlist--latex-cmd-under-point)))
-      (find-file-other-window (car cmdlist-files))
-      (setq cmd (completing-read "Goto command: "
-                                 (mapcar 'cmdlist--newcmd-name (cmdlist--scan-for-newcmds))
-                                 nil nil nil nil cmd))
-      (when cmd
-        (let ((cmd-pos))
-          (cmdlist--save-everything
-            (goto-char (point-min))
-            (when (re-search-forward (concat cmdlist--newcmd-regex "{?\\\\" cmd "[}{\\[]") nil t)
-              (setq cmd-pos (point))))
-          (when cmd-pos
-            (goto-char cmd-pos)))))))
+    (find-file-other-window (car cmdlist-files))))
 
 (defun cmdlist-conditional-update-buffer ()
   "If `cmdlist-heading' is present in the buffer, run `cmdlist-update-latex-buffer'. If furthermore either of `cmdlist-theorem-heading' or `cmdlist-package-heading' is present, run `cmdlist-newthm-update-latex-buffer' or `cmdlist-package-update-latex-buffer', respectively.
