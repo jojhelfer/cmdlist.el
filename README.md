@@ -2,18 +2,18 @@
 
 **`cmdlist.el`** is an emacs package for automatically adding `\newcommand` (and `\newtheorem` and `\usepackage`) statements to your LaTeX files based on which commands you use in the document. This is done in two ways:
 
-1. The `\newcommand` and `\newtheorem` statements are pulled from a global file (by default `~/.latex-commands.sty` and `~/.latex-theorems.sty`). Hence, this is an alternative to simply including (i.e., calling `\usepackage` on) a global `.sty` file; the latter has the disadvantage that you cannot safely make changes to your `.sty` file without possibly breaking older documents.
-2. The `\usepackage` statements are updated according to another file (by default `~/.latex-packages.sty`) containing a list of which commands are provided by each package (and each documentclass). An example such file (`~/latex-packages.sty.example`) is provided containing many of the most common commands. (It should be possible to generate such a file automatically, but I haven't figured out a good way to do so.)
+1. The `\newcommand` and `\newtheorem` statements are pulled from a global file (by default `~/.emacs.d/cmdlist/latex-commands.sty` and `~/.emacs.d/cmdlist/latex-theorems.sty`). Hence, this is an alternative to simply including (i.e., calling `\usepackage` on) a global `.sty` file; the latter has the disadvantage that you cannot safely make changes to your `.sty` file without possibly breaking older documents.
+2. The `\usepackage` statements are updated according to another file (by default `~/.emacs.d/cmdlist/latex-packages.sty`) containing a list of which commands are provided by each package (and each documentclass). An example such file (`~/latex-packages.sty.example`) is provided containing many of the most common commands. (It should be possible to generate such a file automatically, but I haven't figured out a good way to do so.)
 
 These two features (let us call them the _command feature_ and the _package feature_) can be used independently.
 
 There is also a third main feature (let us call it the _builtin feature_) (which at present is used automatically with the package feature, but could be easily decoupled if anyone wanted that):
 
-3. You maintain yet another file (by default `~/.latex-builtins`) containing a list of the built-in commands provided by TeX/LaTeX (again, an example `latex-builtings.example` is provided with a list of some of the most common ones). When using this feature, your file is scanned for any command which is not defined in the current file (and therefore wasn't pulled in from your `~/.latex-commands.sty` file) and which is not listed as built-in or provided by any package or documentclass, and you are asked what you would like to do about it (e.g., mark it as built-in or belonging to a package, or just editing it in case it was a typo).
+3. You maintain yet another file (by default `~/.emacs.d/cmdlist/latex-builtins`) containing a list of the built-in commands provided by TeX/LaTeX (again, an example `latex-builtings.example` is provided with a list of some of the most common ones). When using this feature, your file is scanned for any command which is not defined in the current file (and therefore wasn't pulled in from your `latex-commands.sty` file) and which is not listed as built-in or provided by any package or documentclass, and you are asked what you would like to do about it (e.g., mark it as built-in or belonging to a package, or just editing it in case it was a typo).
 
    Thus, when using this feature, "every command is accounted for".
 
-There are also various convenience functions for adding commands to the `~/.latex-commands.sty` file and related actions.
+There are also various convenience functions for adding commands to the `latex-commands.sty` file and related actions.
 
 # Usage
 ## Installation
@@ -27,9 +27,9 @@ or, if `/path/to/` is in your `load-path`:
 ```
 to your init file.
 
-You must also create the files `~/.latex-commands.sty`, `~/.latex-theorems.sty`, `~/.latex-packages.sty`, and `~/.latex-builtins` (or the values of the variables `cmdlist-files`, `cmdlist-theorem-file`, `cmdlist-package-file`, and `cmdlist-builtin-file`, respectively).
+You must also create the files `~/.emacs.d/cmdlist/latex-commands.sty`, `~/.emacs.d/cmdlist/latex-theorems.sty`, `~/.emacs.d/cmdlist/latex-packages.sty`, and `~/.emacs.d/cmdlist/latex-builtins` (or the values of the variables `cmdlist-files`, `cmdlist-theorem-file`, `cmdlist-package-file`, and `cmdlist-builtin-file`, respectively).
 
-You would also be wise to copy `latex-packages.sty.example` and `latex-builtins.example` to `~/.latex-packages.sty`, and `~/.latex-builtins` (or the values of the corresponding variables), respectively. You may also want to look at `latex-commands.sty.example` and `latex-theorems.sty.example`.
+You would also be wise to copy `latex-packages.sty.example` and `latex-builtins.example` to `~/.emacs.d/cmdlist/latex-packages.sty`, and `~/.emacs.d/cmdlist/latex-builtins` (or the values of the corresponding variables), respectively. You may also want to look at `latex-commands.sty.example` and `latex-theorems.sty.example`.
 
 ## The simplest way to use all the main features
 Run the command `cmdlist-conditional-update-buffer` whenever you want to update your commands and packages. For this to work, your LaTeX file's preamble should contain (some subset of) the following.
@@ -83,7 +83,7 @@ If you are interested in writing your own functions along these lines, you may w
 
 ### Viewing the global command file
 
-`cmdlist-open-cmdlist-file` opens the global command file in the other window and asks you (with completion) for a command to look at (this uses [swiper](https://github.com/abo-abo/swiper) if you have it installed).
+`cmdlist-open-cmdlist-file` opens the global command file in the other window.
 
 ### Testing a command in a minimal environment.
 
@@ -97,14 +97,14 @@ As explained above, `cmdlist-package-update-latex-buffer` implements an "every c
 
 You can customize which such commands are recognized with the variable `cmdlist-cmd-defining-cmds`.
 
-## Syntax of the files `.latex-theorems.sty` and `latex-packages.sty`
+## Syntax of the files `latex-theorems.sty` and `latex-packages.sty`
 
-Most of the time, you do not need to edit any of the files (`.latex-commands.sty`, etc.) by hand -- they are updated automatically by various functions. But sometimes, you might need to go in and edit them by hand (and in fact, there are presently no functions for modifying `.latex-theorems.sty`).
+Most of the time, you do not need to edit any of the files (`latex-commands.sty`, etc.) by hand -- they are updated automatically by various functions. But sometimes, you might need to go in and edit them by hand (and in fact, there are presently no functions for modifying `latex-theorems.sty`).
 
-The files `.latex-commands.sty` and `.latex-builtins` have a fairly self-explanatory syntax (look at the provided `.example` files!). The former simply has one `\(re)newcommand` statement per line (possibly with a comment, which is simply included when the command is imported), and the latter simply has one command name per line.
+The files `latex-commands.sty` and `latex-builtins` have a fairly self-explanatory syntax (look at the provided `.example` files!). The former simply has one `\(re)newcommand` statement per line (possibly with a comment, which is simply included when the command is imported), and the latter simply has one command name per line.
 
-### `.latex-theorems.sty`
-This file is similar to `.latex-commands.sty`, except that, if a line has a comment, it should just be a single word (and should probably be `definition` or `remark`). Here is an example line:
+### `latex-theorems.sty`
+This file is similar to `latex-commands.sty`, except that, if a line has a comment, it should just be a single word (and should probably be `definition` or `remark`). Here is an example line:
 ```
 \newtheorem{defn}{Definition}%definition
 ```
@@ -112,7 +112,7 @@ When this line is imported, the comment is removed, and it is placed under the l
 
 Another thing about importing `\newtheorem` statements: when this is done, if the variable `cmdlist-default-shared-counter` is non-nil (the default value is `"defn"`), its value is added as an optional argument to `\newtheorem` after the first argument, i.e., `\newtheorem{X}[here]{Y}`. Otherwise, if `cmdlist-default-parent-counter` is non-nil, its value is added as an optional argument after the second argument, i.e., `\newtheorem{X}{Y}[here]`.
 
-### `.latex-packages.sty`
+### `latex-packages.sty`
 The file `latex-packages.sty` is a bit more complicated. There are four types of lines. Here are examples of all four:
 ```
 \usepackage{pgfplots}%axis,empty
@@ -129,19 +129,19 @@ We summarize the variables available for customization.
 
 * `cmdlist-files`: see above (note that this is a list of filenames, all of which are used draw commands from; the first entry in the list is the file which new commands are added to)
 
-  Default: `"~/.latex-commands.sty"`
+  Default: `"~/.emacs.d/cmdlist/latex-commands.sty"`
 
 * `cmdlist-theorem-file`: see above
 
-  Default: `"~/.latex-theorems.sty"`
+  Default: `"~/.emacs.d/cmdlist/latex-theorems.sty"`
 
 * `cmdlist-package-file`: see above
 
-  Default: `"~/.latex-packages.sty"`
+  Default: `"~/.emacs.d/cmdlist/latex-packages.sty"`
 
 * `cmdlist-builtin-file`: see above
 
-  Default: `"~/.latex-builtins"`
+  Default: `"~/.emacs.d/cmdlist/latex-builtins"`
 
 * `cmdlist-heading`: see above
 
@@ -219,4 +219,4 @@ just because I'm so much in the habit now of typing `SPC d c` whenever I want to
 # Kaizen
 I hope you use and enjoy this package! There are presumably a bunch of bugs. Please tell me about them if you find them! Also, please contribute any bug fixes or other improvements you make.
 
-And especially: if you beef up your `.latex-packages.sty` and `.latex-builtins` files, please send me your beefed up files so I can incorporate them into the repository.
+And especially: if you beef up your `latex-packages.sty` and `latex-builtins` files, please send me your beefed up files so I can incorporate them into the repository.
