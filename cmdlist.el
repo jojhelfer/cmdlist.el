@@ -814,15 +814,11 @@ Return non-nil if required config files exist, otherwise nil."
       (goto-char (point-min))
       (setq has-pkg-heading (re-search-forward (concat "^" cmdlist-package-heading "$") nil t)))
     ;; This will be non-nil precisely if all needed config files exist
-    (cl-loop
-     for x in
-     `((,has-heading . cmdlist-update-latex-buffer)
-       (,has-thm-heading . cmdlist-newthm-update-latex-buffer)
-       (,has-pkg-heading . cmdlist-package-update-latex-buffer))
-     unless (car x) return t
-     do (message "%s" x)
-     unless (funcall (cdr x)) return nil
-     finally return t)))
+    (if (not has-heading) t
+      (and
+       (cmdlist-update-latex-buffer)
+       (if (not has-thm-heading) t (cmdlist-newthm-update-latex-buffer))
+       (if (not has-pkg-heading) t (cmdlist-package-update-latex-buffer))))))
 
 (defun cmdlist-update-save-and-compile ()
   "Save buffer, run `cmdlist-conditional-update-buffer', and then compile with `Tex-command'."
