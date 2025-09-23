@@ -65,6 +65,7 @@
 ;; TODO Be careful about commands (and packages) which are the empty string
 ;; TODO Add \usetikzlibrary support
 ;; TODO Add option to (via elisp) allow presence of certain commands to trigger insertion of arbitrary code in preamble
+;; TODO When adding commands, should check for conflicts with builtin commands and offer a way to record in the file that the builtin should be used rather than a renewcommand.
 
 (require 'cl-lib)
 (require 'seq)
