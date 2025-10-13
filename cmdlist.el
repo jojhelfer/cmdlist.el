@@ -4,7 +4,7 @@
 
 ;; Author: Joseph Helfer
 ;; URL: https://github.com/jojhelfer/cmdlist.el
-;; Version: 1.2.6
+;; Version: 1.2.7
 ;; Package-Requires: ((emacs "25.1"))
 
 ;; This file is NOT part of GNU Emacs.
@@ -288,7 +288,7 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
       (when (search-backward "\\" nil t)
         (let ((cmd (cmdlist--shloop-latex-arg)))
           (when (and (<= start (point))
-                     (string-match-p "[a-ZA-Z@]" (substring cmd 1 2)))
+                     (string-match-p "[a-zA-Z@]" (substring cmd 1 2)))
             (substring cmd 1)))))))
 
 (defun cmdlist--search-backward-incl (string &optional as-regex)
