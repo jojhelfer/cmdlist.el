@@ -1,11 +1,11 @@
 ;;; cmdlist.el --- Automated latex command maintenance
 
-;; Copyright © 2020-2025 Joseph Helfer
+;; Copyright © Joseph Helfer
 
 ;; Author: Joseph Helfer
 ;; URL: https://github.com/jojhelfer/cmdlist.el
-;; Version: 1.2.7
-;; Package-Requires: ((emacs "25.1"))
+;; Version: 2026.01.27
+;; Package-Requires: ((emacs "28.1"))
 
 ;; This file is NOT part of GNU Emacs.
 
@@ -636,7 +636,7 @@ Return non-nil if required config files exist, otherwise nil."
               (message "Added %d new commands:\n%s" (length newcmds) (cmdlist--list-of-things newcmds)))
           (message "No commands added."))))))
 
-(defun add-headers (headers)
+(defun cmdlist--add-headers (headers)
   "Add each string in the list HEADERS to the top of the document under the `documentclass' line. Each string is inserted preceded by `% ' and separated by a blank line. Do nothing and return `nil' if the document class line is not found, else return `t'."
   (cmdlist--save-everything-widen
     (goto-char (point-min))
