@@ -116,7 +116,7 @@
 (defvar cmdlist-builtin-file (file-name-concat cmdlist-base-directory "latex-builtins")
   "File containing a list of built-in latex commands and environments, one per line.")
 
-(defvar cmdlist-cmd-defining-cmds
+(defvar-local cmdlist-cmd-defining-cmds
   (list "let" "def" "newtheorem*" "foreach"
         (list "newif"
               (lambda (cmd)
@@ -131,7 +131,7 @@
 (defvar cmdlist-ignore-at-symbol t
   "If non-nil, `cmdlist-package-update-latex-buffer' will ignore commands containing `@'. (Note that, in any case, `@' is always treated as part of a command name, which will be incorrect if not within `\\makeatletter' region.)")
 
-(defvar cmdlist-newcommands-to-ignore ()
+(defvar-local cmdlist-newcommands-to-ignore ()
   "List of commands that should not be taken from `cmdlist-files' by `cmdlist-update-latex-buffer'. This can be used, for example, to prevent a \"renewcommand\" of a builtin command from getting inserted.")
 
 (defvar cmdlist-test-minimal-file "/tmp/minimal.tex"
