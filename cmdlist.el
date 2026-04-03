@@ -1163,7 +1163,7 @@ Return non-nil if required config files exist, otherwise nil."
                   (when (eq (char-after) ?\[)
                             (cmdlist--shloop-optional-latex-arg))
                   ;; Remove any surrounding brackets and backslashes
-                  (car (split-string (cmdlist--shloop-latex-arg) nil nil "\\\\?[{}]*")))))
+                  (car (split-string (cmdlist--shloop-latex-arg) nil nil "[\\\\{}]*")))))
           (if (member match cmdlist-cmd-defining-cmds)
               (push defined-cmd res)
             (let ((generated-cmds
