@@ -285,7 +285,8 @@ FMT specifies how the number should be formatted (default \"[%d]\")."
     (cmdlist--save-everything
       (when (< (point) (point-max))
         (forward-char))
-      (when (search-backward "\\" nil t)
+      (when (and (search-backward "\\" nil t)
+                 (not (cmdlist-odd-chars-p ?\\)))
         (let ((cmd (cmdlist--shloop-latex-arg)))
           (when (and (<= start (point))
                      (string-match-p "[a-zA-Z@]" (substring cmd 1 2)))
