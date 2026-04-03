@@ -134,6 +134,9 @@
 (defvar-local cmdlist-newcommands-to-ignore ()
   "List of commands that should not be taken from `cmdlist-files' by `cmdlist-update-latex-buffer'. This can be used, for example, to prevent a \"renewcommand\" of a builtin command from getting inserted.")
 
+(defvar-local cmdlist-packages-to-ignore ()
+  "List of packages that should not be taken from `cmdlist-package-file' by `cmdlist-package-update-latex-buffer'.")
+
 (defvar cmdlist-test-minimal-file "/tmp/minimal.tex"
   "Path of file created by `cmdlist-test-command-in-minimal-file' (which is called during `cmdlist-package-update-latex-buffer' when you come across an unrecognized command and select \"test it in a minimal LaTeX file\").")
 
@@ -904,7 +907,7 @@ Return non-nil if required config files exist, otherwise nil."
       (unless file (setq file cmdlist-theorem-file))
       (let* ((thmlist (cmdlist--scan-file-for-newcmds file cmdlist--newthm-regex))
              (envs (append (cmdlist--scan-for-latex-envs) (cmdlist--get-newtheorem-dependencies)))
-             (exceptions (mapcar #'(lambda (x) (cmdlist--newcmd-name x cmdlist--newthm-regex)) (cmdlist--scan-for-newcmds cmdlist--newthm-regex)))
+             (exceptions (cmdlist--buffer-provided-cmds))
              (newthms
               (seq-filter
                (lambda (thm)
@@ -976,8 +979,8 @@ Return non-nil if required config files exist, otherwise nil."
                              "") "," t)))))
       (cl-remove-duplicates result))))
 
-(defun cmdlist--match-in-package-file (name &optional recurse file)
-  "Return a list of all lines (minus final `%.*' in FILE (default `cmdlist-package-file)) which start with `\\usepackage' and include NAME in a comma-separated list after a `%'. If RECURSE is non-nil, also recursively return any lines which have a package after their second `%' which provides NAME."
+(defun cmdlist--match-in-package-file (name &optional recurse file ignore)
+  "Return a list of all lines (minus final `%.*' in FILE (default `cmdlist-package-file)) which start with `\\usepackage' and include NAME in a comma-separated list after a `%'. If RECURSE is non-nil, also recursively return any lines which have a package after their second `%' which provides NAME. Exclude any packages in IGNORE (also during the recursion, if applicable)."
   (unless file (setq file cmdlist-package-file))
   (with-temp-buffer
     (insert-file-contents file)
@@ -994,10 +997,11 @@ Return non-nil if required config files exist, otherwise nil."
                         (regexp-quote name)
                         "\\([,%]\\|\n\\)")
                 nil t)
-          (push (match-string 1) res)
-          (when (and recurse (not (member (match-string 2) pkgs-for-rec)))
-            (push (match-string 2) names)
-            (push (match-string 2) pkgs-for-rec)))
+          (unless (member (match-string 2) ignore)
+            (push (match-string 1) res)
+            (when (and recurse (not (member (match-string 2) pkgs-for-rec)))
+              (push (match-string 2) names)
+              (push (match-string 2) pkgs-for-rec))))
         (setq is-pkg t))
       res)))
 
@@ -1217,7 +1221,7 @@ Return non-nil if required config files exist, otherwise nil."
                                  (string= curex c-or-e)))
                      ;; Find a matching package
                      (let ((pkgmatch (cmdlist--singleton-or-prompt
-                                      (cmdlist--match-in-package-file c-or-e t package-file)
+                                      (cmdlist--match-in-package-file c-or-e t package-file cmdlist-packages-to-ignore)
                                       (concat "\n Multiple packages provide `"
                                               c-or-e "'. Choose one: "))))
                        ;; If we found one, add it, and refresh exceptions.
@@ -1269,7 +1273,7 @@ Return non-nil if required config files exist, otherwise nil."
             (message "%s" (concat "`" c-or-e "' already defined or provided"))
           ;; Find a matching package
           (let ((pkgmatch (cmdlist--singleton-or-prompt
-                           (cmdlist--match-in-package-file c-or-e t package-file)
+                           (cmdlist--match-in-package-file c-or-e t package-file cmdlist-packages-to-ignore)
                            (concat "\n Multiple packages provide `" c-or-e "'. Choose one: "))))
             ;; If we found one, add it
             (if pkgmatch
